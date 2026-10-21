@@ -26,10 +26,10 @@ defmodule WardrikCore.MixProject do
       {:durable_server, "~> 0.1.6"},
       {:group, "~> 0.2"},
       {:ekv, "~> 0.4.8", optional: true},
-      {:mimic, "~> 2.4"},
+      {:mimic, "~> 2.4", only: :test},
       {:jsv, "~> 0.26.1"},
-      {:dialyxir, "~> 1.4", runtime: false},
-      {:credo, "~> 1.7", runtime: false}
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: :dev, runtime: false}
     ]
   end
 end

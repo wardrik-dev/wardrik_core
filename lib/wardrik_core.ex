@@ -16,7 +16,7 @@ defmodule WardrikCore do
         agent_id: agent_id,
         http_client: Req,
         llm_client: opts[:llm_client] || ReqLLM,
-        capabilities: opts[:capabilities] || %{},
+        capabilities: opts[:capabilities] || [],
         middleware: opts[:middleware] || []
       )
 

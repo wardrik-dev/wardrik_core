@@ -3,15 +3,21 @@ defmodule WardrikCore.Context do
   The token threaded through a turn's middleware, like a `Req.Request`.
   """
 
+  @type step :: :turn | :generate | {:tool_call, ReqLLM.ToolCall.t()}
+
   @type t() :: %__MODULE__{
           agent_id: String.t(),
           model: LLMDB.Model.t() | String.t(),
           http_client: module(),
           llm_client: module(),
+          step: step() | nil,
           messages: [ReqLLM.Message.t()],
-          response: ReqLLM.Response.t() | nil,
-          capabilities: map(),
+          # A model response for :generate, a tool's {:ok, _} | {:error, _} for :tool_call.
+          response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
+          capabilities: [module()],
+          tools: [ReqLLM.Tool.t()],
           middleware: [module()],
+          max_rounds: pos_integer(),
           metadata: map()
         }
 
@@ -20,10 +26,13 @@ defmodule WardrikCore.Context do
     :model,
     :http_client,
     :llm_client,
+    :step,
     :response,
     messages: [],
-    capabilities: %{},
+    capabilities: [],
+    tools: [],
     middleware: [],
+    max_rounds: 25,
     metadata: %{}
   ]
 
@@ -38,5 +47,15 @@ defmodule WardrikCore.Context do
     |> Enum.reverse()
     |> Enum.reduce(fun, fn mod, next -> &mod.call(&1, next) end)
     |> then(& &1.(context))
+  end
+
+  @doc "Runs `fun` as `step`, restoring the context's own step on the way out."
+  @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
+  def run(%__MODULE__{step: outer} = context, step, fun) do
+    case run(%{context | step: step}, fun) do
+      {:ok, context} -> {:ok, %{context | step: outer}}
+      {:park, reason, context} -> {:park, reason, %{context | step: outer}}
+      {:error, reason} -> {:error, reason}
+    end
   end
 end

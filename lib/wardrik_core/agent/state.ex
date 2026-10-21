@@ -26,7 +26,15 @@ defmodule WardrikCore.Agent.State do
   ]
 
   @persisted [:uuid, :agent_id, :recent_message_ids, :last_run_at, :messages, :pending_messages]
-  @persisted_context [:http_client, :llm_client, :capabilities, :middleware, :metadata, :messages]
+  @persisted_context [
+    :http_client,
+    :llm_client,
+    :capabilities,
+    :middleware,
+    :max_rounds,
+    :metadata,
+    :messages
+  ]
 
   def new(opts) do
     opts = Keyword.update!(opts, :model, &resolve_model!/1)
