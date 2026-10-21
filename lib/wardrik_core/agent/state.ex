@@ -28,6 +28,7 @@ defmodule WardrikCore.Agent.State do
   @persisted [
     :uuid,
     :agent_id,
+    :model,
     :recent_message_ids,
     :last_run_at,
     :messages,
@@ -43,7 +44,7 @@ defmodule WardrikCore.Agent.State do
   ]
 
   def new(opts) do
-    opts = Keyword.update!(opts, :model, &resolve_model!/1)
+    opts = Keyword.update!(opts, :model, &canonical_spec!/1)
 
     struct!(__MODULE__, opts)
   end
@@ -54,16 +55,12 @@ defmodule WardrikCore.Agent.State do
     state
     |> Map.take(@persisted)
     |> Map.merge(%{
-      model: LLMDB.Model.spec(state.model),
       context: dump_context(state.context),
       parked: state.parked
     })
     |> Map.merge(requeued(state))
   end
 
-  # A running turn dies with the process. A resumed one comes back waiting on
-  # the same calls, its decisions lost; any other comes back idle, with what
-  # it took queued again to be re-run.
   defp requeued(%__MODULE__{state: :running, parked: %{}}), do: %{state: :waiting}
 
   defp requeued(%__MODULE__{state: :running} = state),
@@ -82,10 +79,7 @@ defmodule WardrikCore.Agent.State do
   def load(%{} = dumped) do
     __MODULE__
     |> struct(dumped)
-    |> Map.merge(%{
-      model: resolve_model!(dumped.model),
-      context: load_context(dumped.context, dumped.agent_id)
-    })
+    |> Map.put(:context, load_context(dumped.context, dumped.agent_id))
   end
 
   defp load_context(nil, _agent_id), do: nil
@@ -93,9 +87,9 @@ defmodule WardrikCore.Agent.State do
   defp load_context(dumped, agent_id),
     do: struct(WardrikCore.Context, Map.put(dumped, :agent_id, agent_id))
 
-  defp resolve_model!(spec) do
+  defp canonical_spec!(spec) do
     case ReqLLM.model(spec) do
-      {:ok, model} -> model
+      {:ok, model} -> LLMDB.Model.spec(model)
       {:error, reason} -> raise ArgumentError, "Invalid model: #{inspect(reason)}"
     end
   end

@@ -45,7 +45,12 @@ defmodule WardrikCore.Agent do
   def handle_cast({:ask, text}, %State{} = state) when is_binary(text) do
     message = ReqLLM.Context.user(text)
     state = %{state | pending_messages: state.pending_messages ++ [message]}
-    {:noreply, state, {:continue, :maybe_run}}
+    {:noreply, state, {:continue, :maybe_run}, sync: true}
+  end
+
+  def handle_cast(request, state) do
+    Logger.warning("Agent #{state.agent_id} ignored an unknown cast: #{inspect(request)}")
+    {:noreply, state}
   end
 
   @impl true
@@ -69,13 +74,13 @@ defmodule WardrikCore.Agent do
   def handle_info({ref, result}, %State{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
     stop_turn(state, elem(result, 0))
-    {:noreply, finished(state, result), {:continue, :maybe_run}}
+    {:noreply, finished(state, result), {:continue, :maybe_run}, sync: true}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %State{task: %Task{ref: ref}} = state) do
     Logger.error("Turn crashed for agent #{state.agent_id}: #{inspect(reason)}")
     stop_turn(state, :crash)
-    {:noreply, unanswered(state), {:continue, :maybe_run}}
+    {:noreply, unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}

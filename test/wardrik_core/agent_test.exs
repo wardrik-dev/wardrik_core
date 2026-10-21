@@ -42,6 +42,39 @@ defmodule WardrikCore.AgentTest do
     assert %{state: :idle, in_flight: [], messages: [%{role: :user}]} = agent_state(agent)
   end
 
+  test "a message survives the agent dying mid-turn, and runs when it comes back" do
+    test = self()
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ ->
+      send(test, :generating)
+      receive do: (:never -> :ok)
+    end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent()
+    WardrikCore.ask(agent, "hi")
+    assert_receive :generating
+
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, _pid, :killed}
+
+    {^id, agent} = start_agent(agent_id: id)
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+
+    assert %{messages: messages} = agent_state(agent)
+    assert [:user, :assistant] = Enum.map(messages, & &1.role)
+  end
+
+  test "an unknown cast is ignored" do
+    {_id, agent} = start_agent()
+
+    GenServer.cast(agent, :not_a_request)
+
+    assert nil == WardrikCore.parked(agent)
+  end
+
   test "a parked turn is resumed through the public API" do
     ReqLLM
     |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo", %{text: "a"})])} end)
@@ -68,7 +101,8 @@ defmodule WardrikCore.AgentTest do
   end
 
   defp start_agent(opts \\ []) do
-    id = "agent-#{System.unique_integer([:positive])}"
+    {id, opts} =
+      Keyword.pop_lazy(opts, :agent_id, fn -> "agent-#{System.unique_integer([:positive])}" end)
 
     {:ok, {agent, _}} =
       [agent_id: id, model: "anthropic:claude-haiku-4-5", capabilities: [Echo]]

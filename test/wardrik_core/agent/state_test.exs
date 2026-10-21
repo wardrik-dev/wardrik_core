@@ -11,7 +11,7 @@ defmodule WardrikCore.Agent.StateTest do
       assert %State{} = state
       assert state.uuid == "1234"
       assert state.agent_id == "agent_1"
-      assert %LLMDB.Model{} = state.model
+      assert state.model == "moonshotai:kimi-k3"
       assert state.state == :idle
     end
 
@@ -73,6 +73,12 @@ defmodule WardrikCore.Agent.StateTest do
       dumped = %{dumped | context: Map.put(dumped.context, :removed_field, true)}
 
       assert %State{context: %WardrikCore.Context{}} = State.load(dumped)
+    end
+
+    test "loads a state whose model no longer resolves", %{state: state} do
+      dumped = %{State.dump(state) | model: "gone:model"}
+
+      assert %State{model: "gone:model"} = State.load(dumped)
     end
 
     test "round trips the model and context", %{state: state} do
