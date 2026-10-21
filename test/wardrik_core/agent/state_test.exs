@@ -23,4 +23,53 @@ defmodule WardrikCore.Agent.StateTest do
       end
     end
   end
+
+  describe "dump/1 and load/1" do
+    setup do
+      context = WardrikCore.Context.new(agent_id: "agent_1", llm_client: ReqLLM, middleware: [])
+
+      state =
+        State.new(agent_id: "agent_1", model: "moonshotai:kimi-k3", context: context)
+        |> Map.put(:task, Task.async(fn -> :ok end))
+        |> Map.put(:state, :running)
+
+      %{state: state}
+    end
+
+    test "returns a plain map with no processes, refs or functions", %{state: state} do
+      dumped = State.dump(state)
+
+      refute is_struct(dumped)
+      refute Map.has_key?(dumped, :task)
+      assert dumped.model == "moonshotai:kimi-k3"
+      assert serializable?(dumped)
+    end
+
+    test "a running turn comes back idle with its messages queued first", %{state: state} do
+      state = %{state | in_flight: [:taken], pending_messages: [:queued]}
+
+      assert %State{state: :idle, task: nil, in_flight: [], pending_messages: [:taken, :queued]} =
+               state |> State.dump() |> State.load()
+    end
+
+    test "round trips the model and context", %{state: state} do
+      loaded = state |> State.dump() |> State.load()
+
+      assert loaded.model == state.model
+      assert loaded.context.agent_id == "agent_1"
+      assert loaded.context.llm_client == ReqLLM
+    end
+  end
+
+  defp serializable?(term) when is_pid(term) or is_reference(term) or is_function(term),
+    do: false
+
+  defp serializable?(term) when is_port(term), do: false
+  defp serializable?(term) when is_map(term), do: Enum.all?(term, &serializable?/1)
+  defp serializable?(term) when is_list(term), do: Enum.all?(term, &serializable?/1)
+
+  defp serializable?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> serializable?()
+
+  defp serializable?(_term), do: true
 end

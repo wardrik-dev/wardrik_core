@@ -10,8 +10,9 @@ defmodule WardrikCore.Middleware do
   """
   alias WardrikCore.Context
   @type context :: Context.t()
-  @type next :: (context() -> {:ok, context()} | {:error, term()} | {:park, term(), context()})
+  @type result :: {:ok, context()} | {:error, term()} | {:park, term(), context()}
+  @type next :: (context() -> result())
 
   @doc "Provided with the current context and a next function to call, returns a new context or an error."
-  @callback call(context, next) :: {:ok, context} | {:error, term()} | {:park, term(), context}
+  @callback call(context, next) :: result()
 end

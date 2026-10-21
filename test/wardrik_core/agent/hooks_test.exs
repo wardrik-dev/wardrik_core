@@ -1,7 +1,7 @@
 defmodule WardrikCore.Agent.HooksTest do
   use ExUnit.Case, async: true
 
-  alias WardrikCore.Agent.Hooks
+  alias WardrikCore.Hook, as: Hooks
 
   defmodule TestHookMod do
     @behaviour Hooks

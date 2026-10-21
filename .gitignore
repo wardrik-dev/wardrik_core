@@ -21,3 +21,6 @@ erl_crash.dump
 
 # Ignore package tarball (built via "mix hex.build").
 wardrik_core-*.tar
+
+# Local agent store (accidentally created by an unexpanded ~ path)
+/~/
