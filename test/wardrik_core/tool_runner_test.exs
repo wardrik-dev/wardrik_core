@@ -34,9 +34,12 @@ defmodule WardrikCore.ToolRunnerTest do
 
   setup do
     tools = [
-      tool("echo", fn %{text: text} -> {:ok, text} end),
-      tool("die", fn _ -> exit(:boom) end),
-      tool("hang", fn _ -> Process.sleep(:infinity) end)
+      tool("echo", fn %{text: text}, _context -> {:ok, text} end),
+      tool("whoami", fn _args, %Context{step: {:tool_call, call}} -> {:ok, call.id} end),
+      tool("die", fn _args, _context -> exit(:boom) end),
+      tool("raise", fn _args, _context -> raise "kaput" end),
+      tool("hang", fn _args, _context -> receive do: (:never -> :ok) end),
+      tool("slow", fn _args, _context -> receive do: (:never -> :ok) end, timeout: 50)
     ]
 
     %{context: Context.new(tools: tools, metadata: %{test: self()})}
@@ -56,6 +59,25 @@ defmodule WardrikCore.ToolRunnerTest do
              {_, {:error, {:exit, :timeout}}},
              {_, {:ok, "ok"}}
            ] = ToolRunner.run(context, calls, timeout: 100)
+  end
+
+  test "a tool is handed its call", %{context: context} do
+    assert [{_, {:ok, "7"}}] = ToolRunner.run(context, [call("7", "whoami")])
+  end
+
+  test "a batch runs under its tools' declared timeout", %{context: context} do
+    assert [{_, {:error, {:exit, :timeout}}}] = ToolRunner.run(context, [call("1", "slow")])
+  end
+
+  test "arguments that don't match the schema never reach the tool", %{context: context} do
+    assert [{_, {:error, _}}] = ToolRunner.run(context, [call("1", "echo", %{text: 1})])
+  end
+
+  test "a tool that raises is answered with its message", %{context: context} do
+    results = ToolRunner.run(context, [call("1", "raise")])
+
+    assert [%{content: [%{text: text}]}] = ToolRunner.messages(results)
+    assert text =~ "kaput"
   end
 
   test "an unknown tool is answered with an error", %{context: context} do
@@ -91,12 +113,13 @@ defmodule WardrikCore.ToolRunnerTest do
              ToolRunner.messages(results)
   end
 
-  defp tool(name, callback) do
-    ReqLLM.Tool.new!(
+  defp tool(name, run, meta \\ %{}) do
+    WardrikCore.Tool.new!(
       name: name,
       description: name,
-      parameter_schema: [text: [type: :string]],
-      callback: callback
+      schema: [text: [type: :string]],
+      run: run,
+      meta: Map.new(meta)
     )
   end
 

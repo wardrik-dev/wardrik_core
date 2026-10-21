@@ -24,3 +24,6 @@ wardrik_core-*.tar
 
 # Local agent store (accidentally created by an unexpanded ~ path)
 /~/
+
+# Dialyzer PLT cache
+/priv/plts/

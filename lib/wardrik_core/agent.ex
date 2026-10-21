@@ -20,10 +20,26 @@ defmodule WardrikCore.Agent do
 
     Process.flag(:trap_exit, true)
 
+    # DurableServer's init can't return a continue, so drain the queue by message.
+    # credo:disable-for-next-line WardrikCore.Credo.Check.NoSelfSend
     send(self(), :maybe_run)
 
     {:ok, state}
   end
+
+  # A resumed turn runs under the agent's config as it is now, on the messages it parked with.
+  @impl true
+  def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
+    context = %{state.context | model: state.model, messages: parked.messages}
+    {:reply, :ok, start_turn(state, fn -> Turn.resume(context, parked.reason, input) end)}
+  end
+
+  def handle_call({:resume, _input}, _from, state), do: {:reply, {:error, :not_parked}, state}
+
+  def handle_call(:parked, _from, %State{state: :waiting, parked: parked} = state),
+    do: {:reply, parked.reason, state}
+
+  def handle_call(:parked, _from, state), do: {:reply, nil, state}
 
   @impl true
   def handle_cast({:ask, text}, %State{} = state) when is_binary(text) do
@@ -41,16 +57,8 @@ defmodule WardrikCore.Agent do
         response: nil
     }
 
-    task = Task.Supervisor.async(WardrikCore.TaskSupervisor, fn -> Turn.run(context) end)
-
-    {:noreply,
-     %{
-       state
-       | state: :running,
-         task: task,
-         in_flight: state.pending_messages,
-         pending_messages: []
-     }}
+    state = %{state | in_flight: state.pending_messages, pending_messages: []}
+    {:noreply, start_turn(state, fn -> Turn.run(context) end)}
   end
 
   def handle_continue(:maybe_run, state), do: {:noreply, state}
@@ -60,11 +68,13 @@ defmodule WardrikCore.Agent do
 
   def handle_info({ref, result}, %State{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
+    stop_turn(state, elem(result, 0))
     {:noreply, finished(state, result), {:continue, :maybe_run}}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %State{task: %Task{ref: ref}} = state) do
     Logger.error("Turn crashed for agent #{state.agent_id}: #{inspect(reason)}")
+    stop_turn(state, :crash)
     {:noreply, unanswered(state), {:continue, :maybe_run}}
   end
 
@@ -79,12 +89,37 @@ defmodule WardrikCore.Agent do
   def terminate(_reason, %State{task: %Task{} = task}), do: Task.shutdown(task, :brutal_kill)
   def terminate(_reason, _state), do: :ok
 
-  defp finished(state, {:ok, context}),
-    do: %{state | state: :idle, task: nil, in_flight: [], messages: context.messages}
+  defp start_turn(state, fun) do
+    :telemetry.execute([:wardrik_core, :turn, :start], %{system_time: System.system_time()}, %{
+      agent_id: state.agent_id
+    })
 
+    task = Task.Supervisor.async(WardrikCore.TaskSupervisor, fun)
+    %{state | state: :running, task: task, started_at: System.monotonic_time()}
+  end
+
+  defp stop_turn(state, outcome) do
+    :telemetry.execute(
+      [:wardrik_core, :turn, :stop],
+      %{duration: System.monotonic_time() - state.started_at},
+      %{agent_id: state.agent_id, outcome: outcome}
+    )
+  end
+
+  defp finished(state, {:ok, context}),
+    do: %{
+      state
+      | state: :idle,
+        task: nil,
+        parked: nil,
+        in_flight: [],
+        messages: context.messages
+    }
+
+  # in_flight stays until the turn ends, so a resumed turn that fails keeps them.
   defp finished(state, {:park, reason, context}) do
     Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
-    %{state | state: :waiting, task: nil, in_flight: [], context: context}
+    %{state | state: :waiting, task: nil, parked: %{reason: reason, messages: context.messages}}
   end
 
   defp finished(state, {:error, reason}) do
@@ -98,6 +133,7 @@ defmodule WardrikCore.Agent do
       state
       | state: :idle,
         task: nil,
+        parked: nil,
         in_flight: [],
         messages: state.messages ++ state.in_flight
     }

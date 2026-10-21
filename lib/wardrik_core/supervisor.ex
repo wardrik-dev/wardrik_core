@@ -16,12 +16,10 @@ defmodule WardrikCore.Supervisor do
 
   @impl true
   def init(opts) do
-    Keyword.fetch!(opts, :backend)
-
     durable_opts =
       [prefix: "wardrik/"]
       |> Keyword.merge(opts)
-      |> Keyword.put(:name, WardrikCore.DurableServer)
+      |> Keyword.merge(name: WardrikCore.DurableServer, backend: Keyword.fetch!(opts, :backend))
 
     children = [
       {Task.Supervisor, name: WardrikCore.TaskSupervisor},

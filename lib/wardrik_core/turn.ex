@@ -7,35 +7,93 @@ defmodule WardrikCore.Turn do
 
   @spec run(Context.t()) :: WardrikCore.Middleware.result()
   def run(%Context{} = context) do
-    context = %{context | tools: Enum.flat_map(context.capabilities, & &1.tools(context))}
-    Context.run(context, :turn, &loop(&1, &1.max_rounds))
+    context
+    |> with_tools()
+    |> Context.run(:turn, fn context -> loop(context, context.max_rounds) end)
+  end
+
+  @doc """
+  Re-enters a turn where it parked. The step that parked runs again with
+  `context.resume` set to `{reason, input}`; parked tool calls each with their
+  own reason. What its middleware returns decides what happens next.
+  """
+  @spec resume(Context.t(), term(), term()) :: WardrikCore.Middleware.result()
+  def resume(%Context{} = context, reason, input) do
+    context = %{with_tools(context) | resume: {reason, input}}
+    Context.run(context, :turn, fn context -> reenter(context, reason, input) end)
+  end
+
+  defp reenter(context, {:tool_calls, results}, input) do
+    context = clear_resume(context)
+    parked = parked_calls(results)
+    calls = Enum.map(parked, fn {call, _reason} -> call end)
+    rerun = ToolRunner.run(context, calls, resume: resume_inputs(parked, input))
+
+    continue(context, replace_outcomes(results, rerun), context.max_rounds)
+  end
+
+  defp reenter(context, _reason, _input), do: loop(context, context.max_rounds)
+
+  defp parked_calls(results) do
+    for {call, {:park, reason}} <- results, do: {call, reason}
+  end
+
+  defp resume_inputs(parked, input) do
+    Map.new(parked, fn {call, reason} -> {call.id, {reason, input}} end)
+  end
+
+  defp replace_outcomes(results, rerun) do
+    rerun_outcomes = Map.new(rerun, fn {call, outcome} -> {call.id, outcome} end)
+
+    Enum.map(results, fn {call, outcome} ->
+      {call, Map.get(rerun_outcomes, call.id, outcome)}
+    end)
+  end
+
+  defp with_tools(context) do
+    tools = Enum.flat_map(context.capabilities, fn capability -> capability.tools(context) end)
+    %{context | tools: tools}
   end
 
   defp loop(_context, 0), do: {:error, :max_rounds}
 
   defp loop(context, rounds) do
     with {:ok, context} <- Context.run(context, :generate, &generate/1) do
+      context = clear_resume(context)
+
       case ReqLLM.Response.tool_calls(context.response) do
         [] -> {:ok, context}
-        calls -> run_tools(context, calls, rounds)
+        calls -> continue(context, ToolRunner.run(context, calls), rounds)
       end
     end
   end
 
-  defp run_tools(context, calls, rounds) do
-    results = ToolRunner.run(context, calls)
-
-    if Enum.any?(results, &match?({_call, {:park, _}}, &1)) do
+  defp continue(context, results, rounds) do
+    if any_parked?(results) do
       {:park, {:tool_calls, results}, context}
     else
-      loop(%{context | messages: context.messages ++ ToolRunner.messages(results)}, rounds - 1)
+      context
+      |> append_messages(ToolRunner.messages(results))
+      |> loop(rounds - 1)
     end
   end
 
-  defp generate(%Context{llm_client: client, model: model, messages: messages} = context) do
-    with {:ok, streamed} <- client.stream_text(model, messages, tools: context.tools),
+  defp any_parked?(results) do
+    Enum.any?(results, fn {_call, outcome} -> match?({:park, _reason}, outcome) end)
+  end
+
+  defp clear_resume(context), do: %{context | resume: nil}
+
+  defp append_messages(context, messages),
+    do: %{context | messages: context.messages ++ messages}
+
+  defp generate(%Context{} = context) do
+    tools = Enum.map(context.tools, fn tool -> tool.req_llm end)
+
+    with {:ok, streamed} <- ReqLLM.stream_text(context.model, context.messages, tools: tools),
          {:ok, response} <- ReqLLM.StreamResponse.process_stream(streamed) do
-      {:ok, %{context | response: response, messages: messages ++ [response.message]}}
+      context = %{context | response: response}
+      {:ok, append_messages(context, [response.message])}
     end
   end
 end

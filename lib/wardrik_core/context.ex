@@ -8,26 +8,25 @@ defmodule WardrikCore.Context do
   @type t() :: %__MODULE__{
           agent_id: String.t(),
           model: LLMDB.Model.t() | String.t(),
-          http_client: module(),
-          llm_client: module(),
           step: step() | nil,
           messages: [ReqLLM.Message.t()],
           # A model response for :generate, a tool's {:ok, _} | {:error, _} for :tool_call.
           response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
           capabilities: [module()],
-          tools: [ReqLLM.Tool.t()],
+          tools: [WardrikCore.Tool.t()],
           middleware: [module()],
           max_rounds: pos_integer(),
+          resume: {reason :: term(), input :: term()} | nil,
           metadata: map()
         }
 
   defstruct [
     :agent_id,
     :model,
-    :http_client,
-    :llm_client,
     :step,
     :response,
+    # Set while a parked turn is re-entered: why it parked, and what resumed it.
+    :resume,
     messages: [],
     capabilities: [],
     tools: [],
@@ -37,7 +36,7 @@ defmodule WardrikCore.Context do
   ]
 
   def new(opts) do
-    struct(__MODULE__, opts)
+    struct!(__MODULE__, opts)
   end
 
   @doc "Runs `fun` wrapped in the context's middleware, first in the list outermost."

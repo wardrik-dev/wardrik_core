@@ -8,11 +8,6 @@ defmodule WardrikCore.Middleware do
     - Adding custom logging.
     - Enforcing compliance.
 
-  Every unit of work passes through the chain, named by `context.step`:
-  `:turn` once around the whole turn, `:generate` around each model call, and
-  `{:tool_call, call}` around each tool call, inside that call's task. Steps
-  nest in that order, so metadata set by an outer step (a parent span, say)
-  reaches the steps inside it.
   """
   alias WardrikCore.Context
   @type context :: Context.t()

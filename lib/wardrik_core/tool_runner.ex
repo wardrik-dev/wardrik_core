@@ -1,27 +1,30 @@
 defmodule WardrikCore.ToolRunner do
   @moduledoc """
-  Runs a batch of tool calls concurrently, each in its own task and through
-  the context's middleware as a `{:tool_call, call}` step.
-
-  Every call gets exactly one outcome: a crash, exit or timeout becomes
-  `{:error, reason}` rather than taking down the turn, and the tasks die with
-  the turn that started them.
+  Runs a batch of tool calls concurrently.
   """
   alias ReqLLM.ToolCall
   alias WardrikCore.Context
+  alias WardrikCore.Tool
 
   @timeout :timer.minutes(3)
   @max_concurrency 8
 
   @type outcome :: {:ok, term()} | {:error, term()} | {:park, term()}
 
+  @doc """
+  Runs `calls` and answers each, in order.
+  """
   @spec run(Context.t(), [ToolCall.t()], keyword()) :: [{ToolCall.t(), outcome()}]
   def run(%Context{} = context, calls, opts \\ []) do
+    resume = Keyword.get(opts, :resume, %{})
+
     WardrikCore.TaskSupervisor
-    |> Task.Supervisor.async_stream_nolink(calls, &call(context, &1),
+    |> Task.Supervisor.async_stream_nolink(
+      calls,
+      &call(%{context | resume: Map.get(resume, &1.id)}, &1),
       ordered: true,
       max_concurrency: Keyword.get(opts, :max_concurrency, @max_concurrency),
-      timeout: Keyword.get(opts, :timeout, @timeout),
+      timeout: Keyword.get_lazy(opts, :timeout, fn -> timeout(context.tools, calls) end),
       on_timeout: :kill_task
     )
     |> Enum.zip_with(calls, fn
@@ -47,14 +50,26 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp execute(%Context{step: {:tool_call, call}, tools: tools} = context),
-    do: {:ok, %{context | response: ToolCall.execute(call, tools)}}
+    do: {:ok, %{context | response: Tool.call(tools, call, context)}}
+
+  defp timeout(tools, calls) do
+    names = MapSet.new(calls, &ToolCall.name/1)
+
+    tools
+    |> Enum.filter(&(&1.name in names))
+    |> Enum.map(&Map.get(&1.meta, :timeout, @timeout))
+    |> Enum.max(fn -> @timeout end)
+  end
 
   defp answer(:ok, output), do: output
   defp answer(:error, reason), do: %{error: message(reason)}
 
-  # The model reads the sentence, not the struct around it.
   defp message(reason) when is_binary(reason), do: reason
   defp message(%{__exception__: true} = error), do: Exception.message(error)
   defp message(%{error: error}) when is_binary(error), do: error
+
+  defp message({:exit, {%{__exception__: true} = error, _stacktrace}}),
+    do: Exception.message(error)
+
   defp message(reason), do: inspect(reason)
 end

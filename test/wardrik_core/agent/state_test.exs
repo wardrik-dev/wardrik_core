@@ -26,7 +26,7 @@ defmodule WardrikCore.Agent.StateTest do
 
   describe "dump/1 and load/1" do
     setup do
-      context = WardrikCore.Context.new(agent_id: "agent_1", llm_client: ReqLLM, middleware: [])
+      context = WardrikCore.Context.new(agent_id: "agent_1", middleware: [])
 
       state =
         State.new(agent_id: "agent_1", model: "moonshotai:kimi-k3", context: context)
@@ -52,12 +52,35 @@ defmodule WardrikCore.Agent.StateTest do
                state |> State.dump() |> State.load()
     end
 
+    test "a parked turn round trips", %{state: state} do
+      parked = %{reason: {:tool_calls, []}, messages: [:asked]}
+      state = %{state | state: :waiting, parked: parked, in_flight: [:taken]}
+
+      assert %State{state: :waiting, in_flight: [:taken], parked: ^parked} =
+               state |> State.dump() |> State.load()
+    end
+
+    test "a resumed turn comes back waiting on the same calls", %{state: state} do
+      parked = %{reason: {:tool_calls, []}, messages: [:asked]}
+      state = %{state | parked: parked, in_flight: [:taken], pending_messages: [:queued]}
+
+      assert %State{state: :waiting, in_flight: [:taken], pending_messages: [:queued]} =
+               state |> State.dump() |> State.load()
+    end
+
+    test "loads a state saved with fields that have since been removed", %{state: state} do
+      dumped = State.dump(state)
+      dumped = %{dumped | context: Map.put(dumped.context, :removed_field, true)}
+
+      assert %State{context: %WardrikCore.Context{}} = State.load(dumped)
+    end
+
     test "round trips the model and context", %{state: state} do
       loaded = state |> State.dump() |> State.load()
 
       assert loaded.model == state.model
       assert loaded.context.agent_id == "agent_1"
-      assert loaded.context.llm_client == ReqLLM
+      assert loaded.context.middleware == []
     end
   end
 

@@ -2,35 +2,13 @@ defmodule WardrikCore.TurnTest do
   use ExUnit.Case, async: true
   use Mimic
 
-  alias ReqLLM.ToolCall
+  import WardrikCore.Test.LLM
+
   alias WardrikCore.Context
+  alias WardrikCore.Test.Echo
+  alias WardrikCore.Test.ParkGenerate
+  alias WardrikCore.Test.ParkTools
   alias WardrikCore.Turn
-
-  defmodule Echo do
-    @behaviour WardrikCore.Capability
-
-    @impl true
-    def tools(_context) do
-      [
-        ReqLLM.Tool.new!(
-          name: "echo",
-          description: "Echoes text",
-          parameter_schema: [text: [type: :string]],
-          callback: fn %{text: text} -> {:ok, text} end
-        )
-      ]
-    end
-  end
-
-  defmodule ParkTools do
-    @behaviour WardrikCore.Middleware
-
-    @impl true
-    def call(%Context{step: {:tool_call, _}} = context, _next),
-      do: {:park, :needs_approval, context}
-
-    def call(context, next), do: next.(context)
-  end
 
   defmodule Report do
     @behaviour WardrikCore.Middleware
@@ -48,7 +26,6 @@ defmodule WardrikCore.TurnTest do
     context =
       Context.new(
         model: "anthropic:claude-haiku-4-5",
-        llm_client: ReqLLM,
         capabilities: [Echo],
         messages: [ReqLLM.Context.user("hi")],
         metadata: %{test: self()}
@@ -116,11 +93,66 @@ defmodule WardrikCore.TurnTest do
     assert {:error, :rate_limited} = Turn.run(context)
   end
 
-  defp answer(text), do: response(ReqLLM.Context.assistant(text))
-  defp calling(calls), do: response(ReqLLM.Context.assistant("", tool_calls: calls))
+  describe "resume/3" do
+    setup %{context: context} do
+      context = %{context | middleware: [ParkTools]}
 
-  defp response(message),
-    do: %ReqLLM.Response{id: "resp", model: "test", context: nil, message: message}
+      expect(ReqLLM, :stream_text, fn _, _, _ ->
+        {:ok, calling([call("1", "echo", %{text: "a"}), call("2", "echo", %{text: "b"})])}
+      end)
 
-  defp call(id, name, args \\ %{}), do: ToolCall.new(id, name, JSON.encode!(args))
+      {:park, parked, context} = Turn.run(context)
+      %{context: context, parked: parked}
+    end
+
+    test "approved calls run and the turn carries on", %{context: context, parked: parked} do
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert [%{role: :tool}, %{role: :tool}] = Enum.take(messages, -2)
+        {:ok, answer("done")}
+      end)
+
+      assert {:ok, %Context{messages: messages}} =
+               Turn.resume(context, parked, %{"1" => :approve, "2" => :approve})
+
+      assert [:user, :assistant, :tool, :tool, :assistant] = Enum.map(messages, & &1.role)
+    end
+
+    test "denied calls are answered with the reason", %{context: context, parked: parked} do
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert [%{tool_call_id: "1"}, %{tool_call_id: "2", content: [%{text: text}]}] =
+                 Enum.take(messages, -2)
+
+        assert text =~ "not today"
+        {:ok, answer("done")}
+      end)
+
+      assert {:ok, _} =
+               Turn.resume(context, parked, %{"1" => :approve, "2" => {:deny, "not today"}})
+    end
+
+    test "undecided calls park the turn again", %{context: context, parked: parked} do
+      assert {:park, parked, _context} = Turn.resume(context, parked, %{"1" => :approve})
+      assert {:tool_calls, [{%{id: "1"}, {:ok, "a"}}, {%{id: "2"}, {:park, _}}]} = parked
+    end
+
+    test "input that names no call leaves the turn parked", %{context: context, parked: parked} do
+      assert {:park, ^parked, _context} = Turn.resume(context, parked, %{})
+    end
+  end
+
+  describe "resume/3 on a parked model call" do
+    test "re-runs the model call, and the next one asks again", %{context: context} do
+      context = %{context | middleware: [ParkGenerate]}
+      assert {:park, :spend?, context} = Turn.run(context)
+
+      expect(ReqLLM, :stream_text, fn _, _, _ ->
+        {:ok, calling([call("1", "echo", %{text: "a"})])}
+      end)
+
+      assert {:park, :spend?, %Context{messages: messages}} =
+               Turn.resume(context, :spend?, :ok)
+
+      assert [:user, :assistant, :tool] = Enum.map(messages, & &1.role)
+    end
+  end
 end
