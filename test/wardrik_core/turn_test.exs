@@ -11,6 +11,22 @@ defmodule WardrikCore.TurnTest do
   alias WardrikCore.Test.ParkTools
   alias WardrikCore.Turn
 
+  defmodule Witness do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(
+          %Context{step: {:tool_call, _call}, resume: %Resume{} = resume} = context,
+          next,
+          _opts
+        ) do
+      send(context.metadata.test, {:resumed, resume})
+      next.(context)
+    end
+
+    def call(context, next, _opts), do: next.(context)
+  end
+
   defmodule Named do
     @behaviour WardrikCore.Capability
 
@@ -197,7 +213,7 @@ defmodule WardrikCore.TurnTest do
     end
   end
 
-  describe "resume/3" do
+  describe "resume/2" do
     setup %{context: context} do
       context = %{context | middleware: [ParkTools]}
 
@@ -245,6 +261,22 @@ defmodule WardrikCore.TurnTest do
                Turn.resume(context, %Resume{reason: parked, input: %{"1" => :approve}})
 
       assert {:tool_calls, [{%{id: "1"}, {:ok, "a"}}, {%{id: "2"}, {:park, _}}]} = parked
+    end
+
+    test "each parked call sees who resumed it", %{context: context, parked: parked} do
+      context = %{context | middleware: [Witness | context.middleware]}
+      expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+      resume = %Resume{
+        reason: parked,
+        input: %{"1" => :approve, "2" => :approve},
+        metadata: %{by: "maria"}
+      }
+
+      assert {:ok, _context} = Turn.resume(context, resume)
+
+      assert_receive {:resumed, %Resume{reason: :needs_approval, metadata: %{by: "maria"}}}
+      assert_receive {:resumed, %Resume{reason: :needs_approval, metadata: %{by: "maria"}}}
     end
 
     test "input that names no call leaves the turn parked", %{context: context, parked: parked} do
