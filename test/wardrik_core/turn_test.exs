@@ -10,23 +10,38 @@ defmodule WardrikCore.TurnTest do
   alias WardrikCore.Test.ParkTools
   alias WardrikCore.Turn
 
+  defmodule Named do
+    @behaviour WardrikCore.Capability
+
+    @impl true
+    def tools(_context, name) do
+      [
+        WardrikCore.Tool.new!(
+          name: name,
+          description: name,
+          run: fn _args, _context -> {:ok, name} end
+        )
+      ]
+    end
+  end
+
   defmodule Stream do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(%Context{step: :generate, metadata: %{test: pid}} = context, next) do
+    def call(%Context{step: :generate, metadata: %{test: pid}} = context, next, _opts) do
       handler = fn chunk -> send(pid, {:chunk, chunk}) end
       next.(%{context | on_chunk: [handler | context.on_chunk]})
     end
 
-    def call(context, next), do: next.(context)
+    def call(context, next, _opts), do: next.(context)
   end
 
   defmodule Report do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(%Context{step: step, metadata: %{test: pid}} = context, next) do
+    def call(%Context{step: step, metadata: %{test: pid}} = context, next, _opts) do
       send(pid, {:step, step})
       next.(context)
     end
@@ -59,6 +74,15 @@ defmodule WardrikCore.TurnTest do
     end)
 
     assert {:ok, _} = Turn.run(context)
+  end
+
+  test "a {module, opts} capability gets its options", %{context: context} do
+    expect(ReqLLM, :stream_text, fn _model, _messages, opts ->
+      assert [%ReqLLM.Tool{name: "lookup"}] = opts[:tools]
+      {:ok, answer("hello")}
+    end)
+
+    assert {:ok, _} = Turn.run(%{context | capabilities: [{Named, "lookup"}]})
   end
 
   test "runs tool calls and hands their results back to the model", %{context: context} do

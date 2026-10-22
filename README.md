@@ -8,9 +8,7 @@ Durable agents for Elixir: a model and its tools in a loop, that pick up where t
 def deps do
   [
     {:wardrik_core, "~> 0.1"},
-    {:ekv, "~> 0.4"},
-    # An MCP client to implement capabilities, if desired.
-    {:anubis_mcp, "~> 2.2"}
+    {:ekv, "~> 0.4"}
   ]
 end
 ```
@@ -36,69 +34,38 @@ message back up when it starts again.
 
 ## Give it tools
 
-A capability is a module that hands an agent its tools. Let's give ours every tool an MCP server
-offers, with [anubis_mcp](https://hex.pm/packages/anubis_mcp) as the client:
+A capability is a module that hands an agent its tools:
 
 ```elixir
-defmodule MyApp.MCP do
+defmodule MyApp.Orders do
   @behaviour WardrikCore.Capability
 
   @impl true
-  def tools(%WardrikCore.Context{metadata: %{mcp: client}}) do
-    {:ok, %{result: %{"tools" => listed}}} = Anubis.Client.list_tools(client)
-    Enum.map(listed, &tool(client, &1))
+  def tools(_context, orders) do
+    [
+      WardrikCore.Tool.new!(
+        name: "order_status",
+        description: "Say where an order is.",
+        schema: [order_id: [type: :string, required: true]],
+        run: fn %{order_id: id}, _context -> {:ok, Map.get(orders, id, "unknown")} end
+      )
+    ]
   end
-
-  defp tool(client, %{"name" => name} = listed) do
-    WardrikCore.Tool.new!(
-      name: name,
-      description: listed["description"] || name,
-      schema: listed["inputSchema"],
-      run: fn args, _context -> call(client, name, args) end
-    )
-  end
-
-  defp call(client, name, args) do
-    case Anubis.Client.call_tool(client, name, args) do
-      {:ok, %{is_error: false, result: %{"content" => content}}} -> {:ok, text(content)}
-      {:ok, %{result: %{"content" => content}}} -> {:error, text(content)}
-      {:error, error} -> {:error, error}
-    end
-  end
-
-  defp text(content), do: Enum.map_join(content, "\n", fn part -> part["text"] end)
 end
-```
-
-Start the client beside the agents, and point the agent at it:
-
-```elixir
-children = [
-  {EKV, name: :agents_store, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
-  {WardrikCore, backend: {DurableServer.Backends.EKVStore, name: :agents_store}},
-  {Anubis.Client,
-   name: MyApp.Fetch,
-   transport: {:stdio, command: "uvx", args: ["mcp-server-fetch"]},
-   client_info: %{"name" => "my_app", "version" => "1.0.0"}}
-]
-
-Supervisor.start_link(children, strategy: :rest_for_one)
 
 {:ok, agent} =
   WardrikCore.start_agent(
-    agent_id: "reader",
+    agent_id: "support",
     model: "anthropic:claude-haiku-4-5",
-    capabilities: [MyApp.MCP],
-    metadata: %{mcp: MyApp.Fetch}
+    capabilities: [{MyApp.Orders, %{"1001" => "shipped"}}]
   )
 
-:ok = WardrikCore.ask(agent, "Summarise https://elixir-lang.org")
+:ok = WardrikCore.ask(agent, "Where is order 1001?")
 ```
 
-Notice the capability finds its client in `metadata`, so one module serves any number of servers.
-`tools/1` runs at the start of every turn, so the agent sees what the server offers now. Each tool
-call runs in its own process: one that crashes or times out is answered with an error, and the turn
-carries on.
+Notice the orders arrive as the capability's options, `{MyApp.Orders, opts}`, so one module serves
+many agents. Each tool call runs in its own process: one that crashes or times out is answered with
+an error, and the turn carries on.
 
 ## Wrap every call
 
@@ -112,7 +79,7 @@ defmodule MyApp.Approve do
   alias WardrikCore.Context
 
   @impl true
-  def call(%Context{step: {:tool_call, call}, resume: {:approval, decisions}} = context, next) do
+  def call(%Context{step: {:tool_call, call}, resume: {:approval, decisions}} = context, next, _opts) do
     case Map.get(decisions, call.id) do
       :approve -> next.(context)
       {:deny, reason} -> {:error, reason}
@@ -120,8 +87,8 @@ defmodule MyApp.Approve do
     end
   end
 
-  def call(%Context{step: {:tool_call, _call}} = context, _next), do: {:park, :approval, context}
-  def call(context, next), do: next.(context)
+  def call(%Context{step: {:tool_call, _call}} = context, _next, _opts), do: {:park, :approval, context}
+  def call(context, next, _opts), do: next.(context)
 end
 ```
 
@@ -133,7 +100,7 @@ WardrikCore.resume(agent, %{"call_1" => :approve})
 ```
 
 Reach for middleware when every call needs the same treatment: policy, tracing, retries, a system
-prompt. Like capabilities, middleware reads its settings from `context.metadata`.
+prompt. Like capabilities, it takes options as `{MyApp.Approve, opts}`.
 
 ## Control a running agent
 

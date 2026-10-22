@@ -11,20 +11,20 @@ defmodule WardrikCore.AgentTest do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(%WardrikCore.Context{step: :turn} = context, next) do
+    def call(%WardrikCore.Context{step: :turn} = context, next, _opts) do
       trace = Map.get_lazy(context.metadata, :trace, fn -> System.unique_integer() end)
       send(WardrikCore.AgentTest, {:trace, trace})
       next.(put_in(context.metadata[:trace], trace))
     end
 
-    def call(context, next), do: next.(context)
+    def call(context, next, _opts), do: next.(context)
   end
 
   defmodule Blocking do
     @behaviour WardrikCore.Capability
 
     @impl true
-    def tools(_context) do
+    def tools(_context, _opts) do
       [
         WardrikCore.Tool.new!(
           name: "block",

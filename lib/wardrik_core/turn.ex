@@ -77,7 +77,12 @@ defmodule WardrikCore.Turn do
   end
 
   defp with_tools(context) do
-    tools = Enum.flat_map(context.capabilities, fn capability -> capability.tools(context) end)
+    tools =
+      Enum.flat_map(context.capabilities, fn entry ->
+        {module, opts} = Context.entry(entry)
+        module.tools(context, opts)
+      end)
+
     %{context | tools: tools}
   end
 

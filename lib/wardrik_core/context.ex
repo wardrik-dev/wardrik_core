@@ -5,6 +5,7 @@ defmodule WardrikCore.Context do
   alias WardrikCore.Turn
 
   @type step :: :turn | :generate | {:tool_call, ReqLLM.ToolCall.t()}
+  @type entry :: module() | {module(), term()}
 
   @type t() :: %__MODULE__{
           agent_id: String.t(),
@@ -12,9 +13,9 @@ defmodule WardrikCore.Context do
           step: step() | nil,
           messages: [ReqLLM.Message.t()],
           response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
-          capabilities: [module()],
+          capabilities: [entry()],
           tools: [WardrikCore.Tool.t()],
-          middleware: [module()],
+          middleware: [entry()],
           max_rounds: pos_integer(),
           timeout: timeout(),
           resume: {reason :: term(), input :: term()} | nil,
@@ -49,9 +50,17 @@ defmodule WardrikCore.Context do
   def run(%__MODULE__{middleware: middleware} = context, fun) do
     middleware
     |> Enum.reverse()
-    |> Enum.reduce(fun, fn mod, next -> &mod.call(&1, next) end)
+    |> Enum.reduce(fun, fn entry, next ->
+      {module, opts} = entry(entry)
+      &module.call(&1, next, opts)
+    end)
     |> then(& &1.(context))
   end
+
+  @doc "A capability or middleware entry as `{module, opts}`."
+  @spec entry(entry()) :: {module(), term()}
+  def entry({module, opts}) when is_atom(module), do: {module, opts}
+  def entry(module) when is_atom(module), do: {module, []}
 
   @doc "Runs `fun` as `step`, restoring the outer `step` and `on_chunk` on the way out."
   @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()

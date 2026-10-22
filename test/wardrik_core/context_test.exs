@@ -7,9 +7,18 @@ defmodule WardrikCore.ContextTest do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(context, next) do
+    def call(context, next, _opts) do
       context = update_in(context.metadata[:trail], &[:tag | &1 || []])
       next.(context)
+    end
+  end
+
+  defmodule Label do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(context, next, label) do
+      next.(update_in(context.metadata[:trail], &[label | &1 || []]))
     end
   end
 
@@ -17,7 +26,7 @@ defmodule WardrikCore.ContextTest do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(context, _next), do: {:park, :needs_approval, context}
+    def call(context, _next, _opts), do: {:park, :needs_approval, context}
   end
 
   test "new/1 rejects options it doesn't know" do
@@ -32,6 +41,13 @@ defmodule WardrikCore.ContextTest do
                Context.run(context, fn ctx ->
                  {:ok, update_in(ctx.metadata[:trail], &[:done | &1])}
                end)
+    end
+
+    test "hands each {module, opts} entry its own options" do
+      context = Context.new(middleware: [{Label, :outer}, {Label, :inner}])
+
+      assert {:ok, %Context{metadata: %{trail: [:inner, :outer]}}} =
+               Context.run(context, &{:ok, &1})
     end
 
     test "a middleware can stop the pipeline without calling next" do

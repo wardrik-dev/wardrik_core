@@ -4,5 +4,5 @@ defmodule WardrikCore.Capability do
   """
   alias WardrikCore.Context
 
-  @callback tools(Context.t()) :: [WardrikCore.Tool.t()]
+  @callback tools(Context.t(), opts :: term()) :: [WardrikCore.Tool.t()]
 end

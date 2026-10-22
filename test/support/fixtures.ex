@@ -3,7 +3,7 @@ defmodule WardrikCore.Test.Echo do
   @behaviour WardrikCore.Capability
 
   @impl true
-  def tools(_context) do
+  def tools(_context, _opts) do
     [
       WardrikCore.Tool.new!(
         name: "echo",
@@ -22,7 +22,11 @@ defmodule WardrikCore.Test.ParkTools do
   alias WardrikCore.Context
 
   @impl true
-  def call(%Context{step: {:tool_call, call}, resume: {:needs_approval, input}} = context, next) do
+  def call(
+        %Context{step: {:tool_call, call}, resume: {:needs_approval, input}} = context,
+        next,
+        _opts
+      ) do
     case Map.get(input, call.id) do
       :approve -> next.(context)
       {:deny, reason} -> {:error, reason}
@@ -30,10 +34,10 @@ defmodule WardrikCore.Test.ParkTools do
     end
   end
 
-  def call(%Context{step: {:tool_call, _}} = context, _next),
+  def call(%Context{step: {:tool_call, _}} = context, _next, _opts),
     do: {:park, :needs_approval, context}
 
-  def call(context, next), do: next.(context)
+  def call(context, next, _opts), do: next.(context)
 end
 
 defmodule WardrikCore.Test.ParkGenerate do
@@ -43,9 +47,11 @@ defmodule WardrikCore.Test.ParkGenerate do
   alias WardrikCore.Context
 
   @impl true
-  def call(%Context{step: :generate, resume: {:spend?, :ok}} = context, next), do: next.(context)
-  def call(%Context{step: :generate} = context, _next), do: {:park, :spend?, context}
-  def call(context, next), do: next.(context)
+  def call(%Context{step: :generate, resume: {:spend?, :ok}} = context, next, _opts),
+    do: next.(context)
+
+  def call(%Context{step: :generate} = context, _next, _opts), do: {:park, :spend?, context}
+  def call(context, next, _opts), do: next.(context)
 end
 
 defmodule WardrikCore.Test.LLM do

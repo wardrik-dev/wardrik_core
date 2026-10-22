@@ -10,7 +10,7 @@ defmodule WardrikCore.ToolRunnerTest do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(%Context{step: {:tool_call, call}} = context, next) do
+    def call(%Context{step: {:tool_call, call}} = context, next, _opts) do
       if ToolCall.name(call) == "echo", do: {:error, "not allowed"}, else: next.(context)
     end
   end
@@ -19,14 +19,14 @@ defmodule WardrikCore.ToolRunnerTest do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(context, _next), do: {:park, :needs_approval, context}
+    def call(context, _next, _opts), do: {:park, :needs_approval, context}
   end
 
   defmodule Report do
     @behaviour WardrikCore.Middleware
 
     @impl true
-    def call(%Context{step: step, metadata: %{test: pid}} = context, next) do
+    def call(%Context{step: step, metadata: %{test: pid}} = context, next, _opts) do
       send(pid, {:step, step, self()})
       next.(context)
     end
