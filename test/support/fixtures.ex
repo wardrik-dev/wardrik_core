@@ -9,7 +9,8 @@ defmodule WardrikCore.Test.Echo do
         name: "echo",
         description: "Echoes text",
         schema: [text: [type: :string]],
-        run: fn args, _context -> {:ok, Map.get(args, :text, "")} end
+        run: fn args, _context -> {:ok, Map.get(args, :text, "")} end,
+        annotations: [idempotent: true]
       )
     ]
   end

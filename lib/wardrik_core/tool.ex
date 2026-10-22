@@ -17,11 +17,15 @@ defmodule WardrikCore.Tool do
 
     * `:read_only`, it changes nothing.
     * `:destructive`, what it changes can't be put back.
-    * `:idempotent`, running a call twice does no more than running it once.
+    * `:idempotent`, a call is safe to repeat. Repeating it leaves things as running it once did,
+      like a payment sent with an idempotency key. A call lost in a crash is repeated. Without
+      this, it parks as `:in_doubt` until a person answers.
     * `:open_world`, it reaches things outside the agent's own systems, like the web.
     * `:timeout`, how long a call may take, in milliseconds.
+    * `:subjects`, what a call acts on, as a function of its arguments, like
+      `fn args -> [args["path"]] end`.
 
-  These are MCP's tool annotations. A tool that doesn't say has none of them.
+  The first four are MCP's tool annotations. A tool that doesn't say has none of them.
   """
   use WardrikCore.Private
   alias WardrikCore.Context

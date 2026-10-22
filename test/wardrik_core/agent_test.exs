@@ -47,7 +47,8 @@ defmodule WardrikCore.AgentTest do
           run: fn _args, %{step: {:tool_call, call}} ->
             send(WardrikCore.AgentTest, {:tool_running, call.id, self()})
             receive do: (:release -> {:ok, "released"})
-          end
+          end,
+          annotations: [idempotent: true]
         )
       ]
     end

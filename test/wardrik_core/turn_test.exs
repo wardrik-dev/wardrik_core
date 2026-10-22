@@ -230,6 +230,40 @@ defmodule WardrikCore.TurnTest do
 
       assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
     end
+
+    test "recover/2 parks a call it can't safely run again", %{context: context} do
+      context = %{context | capabilities: [{Named, "refund"}]}
+
+      assert {:park, {:tool_calls, [{%{id: "1"}, {:park, :in_doubt}}]}, _context} =
+               Turn.recover(context, checkpoint(context, "refund"))
+    end
+
+    test "a call in doubt runs again when a person approves", %{context: context} do
+      context = %{context | capabilities: [{Named, "refund"}]}
+      {:park, reason, parked} = Turn.recover(context, checkpoint(context, "refund"))
+
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert %{role: :tool, tool_call_id: "1"} = List.last(messages)
+        {:ok, answer("done")}
+      end)
+
+      assert {:ok, _context} =
+               Turn.resume(parked, %Resume{reason: reason, input: %{"1" => :approve}})
+    end
+
+    test "a call in doubt a person denies is answered with why", %{context: context} do
+      context = %{context | capabilities: [{Named, "refund"}]}
+      {:park, reason, parked} = Turn.recover(context, checkpoint(context, "refund"))
+
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert %{role: :tool, tool_call_id: "1", content: [%{text: text}]} = List.last(messages)
+        assert text =~ "It may have run already."
+        {:ok, answer("done")}
+      end)
+
+      denied = %{"1" => {:deny, "It may have run already."}}
+      assert {:ok, _context} = Turn.resume(parked, %Resume{reason: reason, input: denied})
+    end
   end
 
   describe "resume/2" do
@@ -318,5 +352,19 @@ defmodule WardrikCore.TurnTest do
 
       assert [:user, :assistant, :tool] = Enum.map(messages, & &1.role)
     end
+  end
+
+  defp checkpoint(context, name) do
+    assistant = calling([call("1", name)]).message
+
+    %{
+      messages: context.messages ++ [assistant],
+      calls: Enum.map(assistant.tool_calls, &WardrikCore.ToolCall.from_req_llm/1),
+      rounds: 3,
+      metadata: %{},
+      private: %{},
+      span: WardrikCore.Span.root(),
+      measurements: %{}
+    }
   end
 end

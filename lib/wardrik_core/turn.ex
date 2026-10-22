@@ -1,6 +1,7 @@
 defmodule WardrikCore.Turn do
   @moduledoc false
   alias WardrikCore.Context
+  alias WardrikCore.InDoubt
   alias WardrikCore.Resume
   alias WardrikCore.ToolRunner
   alias WardrikCore.Usage
@@ -32,7 +33,9 @@ defmodule WardrikCore.Turn do
   end
 
   @doc """
-  Carries on a turn lost while its tools ran, from the checkpoint it saved.
+  Carries on a turn lost while its tools ran, from the checkpoint it saved. Each call may already
+  have run. A call whose tool is `idempotent` is safe to repeat, so it's repeated. Any other parks
+  as `:in_doubt`.
   """
   @spec recover(Context.t(), checkpoint()) :: WardrikCore.Middleware.result()
   def recover(
@@ -50,7 +53,9 @@ defmodule WardrikCore.Turn do
         measurements: checkpoint.measurements
     }
 
-    Context.run(context, :turn, fn context -> run_calls(context, calls, rounds) end)
+    Context.run(context, :turn, fn context ->
+      run_calls(context, calls, rounds, resume: InDoubt.resumes(calls))
+    end)
   end
 
   @doc "Asks the turn running in `pid` to end at its next step."
@@ -135,8 +140,8 @@ defmodule WardrikCore.Turn do
     run_calls(context, calls, rounds)
   end
 
-  defp run_calls(context, calls, rounds) do
-    {results, context} = ToolRunner.run(context, calls)
+  defp run_calls(context, calls, rounds, opts \\ []) do
+    {results, context} = ToolRunner.run(context, calls, opts)
     continue(context, results, rounds)
   end
 

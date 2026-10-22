@@ -1,6 +1,7 @@
 defmodule WardrikCore.ToolRunner do
   @moduledoc false
   alias WardrikCore.Context
+  alias WardrikCore.InDoubt
   alias WardrikCore.Telemetry
   alias WardrikCore.Tool
   alias WardrikCore.ToolCall
@@ -67,8 +68,12 @@ defmodule WardrikCore.ToolRunner do
     {:error, {:exit, reason}}
   end
 
-  defp execute(%Context{step: {:tool_call, call}, tools: tools} = context),
-    do: {:ok, answered(context, Tool.call(tools, call, context))}
+  defp execute(%Context{step: {:tool_call, call}, tools: tools} = context) do
+    case InDoubt.check(context, call) do
+      :run -> {:ok, answered(context, Tool.call(tools, call, context))}
+      answer -> {:ok, answered(context, answer)}
+    end
+  end
 
   defp answered(_context, {tag, output, %Context{} = context}) when tag in [:ok, :error],
     do: answered(context, {tag, output})

@@ -33,6 +33,11 @@ Notice `ask/3` returns once the message is stored. If the node dies mid-turn, th
 message back up when it starts again. A turn lost while its tools ran carries on from its last
 checkpoint, without asking the model again.
 
+A tool call lost that way may already have run. It's repeated only if its tool is annotated
+`idempotent: true`, meaning a repeat leaves things as one run did. Any other call parks as
+`:in_doubt`. Answer it with `resume/3`, giving the
+call's id `:approve` to run it again, or `{:deny, reason}` to tell the model why it didn't.
+
 In tests, start `{WardrikCore.Backends.MemoryStore, name: :agents_store}` in EKV's place and name
 it as the backend. It keeps agents in memory, so they're gone when the node stops.
 
