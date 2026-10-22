@@ -23,6 +23,19 @@ defmodule WardrikCore.CredentialsTest do
         [] -> {:authorize, "https://example.com/sign-in/#{name}"}
       end
     end
+
+    @impl true
+    def refused(name, %Principal{id: id}, granted) do
+      :ets.delete(granted, {name, id})
+      :ok
+    end
+  end
+
+  defmodule Forgetful do
+    @behaviour WardrikCore.Credentials
+
+    @impl true
+    def resolve(_name, _principal, _opts), do: {:ok, "the-only-token"}
   end
 
   defmodule Issues do
@@ -76,6 +89,18 @@ defmodule WardrikCore.CredentialsTest do
   test "passes on what the credentials can't give", %{context: context} do
     assert {:error, "The vault is sealed."} = Credentials.fetch(context, "broken")
     assert {:error, _reason} = Credentials.fetch(%{context | credentials: nil}, "github")
+  end
+
+  test "a refused credential isn't given again", %{context: context, granted: granted} do
+    :ets.insert(granted, {{"github", "user:maria"}, "revoked-token"})
+
+    assert :ok = Credentials.refused(context, "github")
+    assert {:park, %Authorization{}} = Credentials.fetch(context, "github")
+  end
+
+  test "credentials that can't be told of a refusal are left as they are", %{context: context} do
+    assert :ok = Credentials.refused(%{context | credentials: Forgetful}, "github")
+    assert :ok = Credentials.refused(%{context | credentials: nil}, "github")
   end
 
   test "a call parked on a sign-in runs again once the person has signed in",

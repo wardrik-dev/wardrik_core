@@ -91,6 +91,9 @@ defmodule MyApp.Vault do
       nil -> {:authorize, "#{opts[:base_url]}/connect/#{name}"}
     end
   end
+
+  @impl true
+  def refused(name, %WardrikCore.Principal{id: id}, _opts), do: MyApp.Tokens.delete(id, name)
 end
 ```
 
@@ -100,6 +103,10 @@ It answers one of three ways:
 - `{:authorize, url}`, when the person must sign in first. The URL is a page in your app, which
   starts the provider's OAuth flow for whoever is signed in.
 - `{:error, reason}`, when it can't help.
+
+`refused/3` is optional. A tool calls it through `WardrikCore.Credentials.refused/2` when a
+service turns a token down, like with a 401. This vault forgets the token, so the next fetch sends
+the person to sign in again.
 
 Give it to the agent, and a tool fetches what it needs:
 
@@ -126,14 +133,24 @@ sign in:
   WardrikCore.parked(agent)
 ```
 
-Your app's OAuth callback stores the token in `MyApp.Tokens`, then resumes the turn. The call runs again,
-and this time the vault has the token:
+Remember which agent asked, like in the OAuth `state` your app signs. Once the callback has stored
+the token in `MyApp.Tokens`, resume that agent. Its id reaches it on any node in the cluster, and
+the call runs again, this time with the token:
 
 ```elixir
-WardrikCore.resume(agent, %{}, %{by: maria})
+agent_id
+|> WardrikCore.whereis()
+|> WardrikCore.resume(%{}, %{by: maria})
 ```
 
+Another agent parked on the same sign-in still shows its own link. When the person opens it, your
+app finds the token already stored, and resumes that agent straight away. They only sign in once.
+
 A credential is a value. It's never kept in the context, so it's never saved or emitted.
+
+`[:wardrik_core, :turn, :stop]` carries a parked turn's `reason`, so you can watch who's waiting
+on what, like on a dashboard, or with an alert for an agent left waiting. Its handlers run in the
+agent's own process, so use them to watch, not to resume agents.
 
 ## Give it tools
 

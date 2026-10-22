@@ -14,6 +14,9 @@ defmodule WardrikCore.Credentials do
   A credential the person hasn't granted yet parks the call on a `WardrikCore.Authorization`. Once
   they've signed in, resume the turn, and the call runs again.
 
+  When a service refuses a credential, like with a 401, tell the credentials with `refused/2` and
+  fetch again. A good one gives a fresh credential, or parks the call on a new sign-in.
+
   A credential is a value, never kept in the context, so it's never saved or emitted. Keep it out of
   private data and attributes too.
 
@@ -24,6 +27,10 @@ defmodule WardrikCore.Credentials do
 
   @callback resolve(name :: String.t(), WardrikCore.Principal.t() | nil, opts :: term()) ::
               {:ok, secret :: term()} | {:authorize, url :: String.t()} | {:error, term()}
+
+  @callback refused(name :: String.t(), WardrikCore.Principal.t() | nil, opts :: term()) :: :ok
+
+  @optional_callbacks refused: 3
 
   @doc "Fetches the credential `name` for whoever the turn acts for. See `Context.acting_for/1`."
   @spec fetch(Context.t(), String.t()) ::
@@ -37,6 +44,21 @@ defmodule WardrikCore.Credentials do
     name
     |> module.resolve(principal, opts)
     |> fetched(name, principal)
+  end
+
+  @doc "Tells the credentials a service refused the credential `name`, so it isn't given again."
+  @spec refused(Context.t(), String.t()) :: :ok
+  def refused(%Context{credentials: nil}, _name), do: :ok
+
+  def refused(%Context{credentials: entry} = context, name) do
+    {module, opts} = Context.entry(entry)
+    told(module, name, Context.acting_for(context), opts)
+  end
+
+  defp told(module, name, principal, opts) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :refused, 3),
+      do: module.refused(name, principal, opts),
+      else: :ok
   end
 
   defp fetched({:authorize, url}, name, principal),

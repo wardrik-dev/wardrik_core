@@ -129,7 +129,7 @@ defmodule WardrikCore.Agent do
 
   def handle_info({ref, result}, %State{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    stop_turn(state, elem(result, 0))
+    stop_turn(state, result)
     {:noreply, finished(state, result), {:continue, :maybe_run}, sync: true}
   end
 
@@ -198,7 +198,7 @@ defmodule WardrikCore.Agent do
   defp stop_running(state, outcome) do
     case Task.shutdown(state.task, :brutal_kill) do
       {:ok, result} ->
-        stop_turn(state, elem(result, 0))
+        stop_turn(state, result)
         finished(state, result)
 
       _stopped ->
@@ -207,16 +207,19 @@ defmodule WardrikCore.Agent do
     end
   end
 
-  defp stop_turn(state, outcome) do
+  defp stop_turn(state, {:park, reason, _context}),
+    do: emit_stop(state, %{outcome: :park, reason: reason})
+
+  defp stop_turn(state, result) when is_tuple(result),
+    do: emit_stop(state, %{outcome: elem(result, 0)})
+
+  defp stop_turn(state, outcome), do: emit_stop(state, %{outcome: outcome})
+
+  defp emit_stop(state, ended) do
     Telemetry.emit(
       [:turn, :stop],
       %{duration: System.monotonic_time() - state.started_at},
-      %{
-        agent_id: state.agent_id,
-        span: state.span,
-        kind: state.turn_kind,
-        outcome: outcome
-      }
+      Map.merge(%{agent_id: state.agent_id, span: state.span, kind: state.turn_kind}, ended)
     )
   end
 

@@ -280,7 +280,9 @@ defmodule WardrikCore.AgentTest do
     :ok = WardrikCore.ask(agent, "hi")
     assert_receive {[:message, :queued], %{agent_id: ^id}}
     assert_receive {[:turn, :start], %{agent_id: ^id, kind: :run, span: span}}
-    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :run, outcome: :park}}
+
+    assert_receive {[:turn, :stop],
+                    %{agent_id: ^id, kind: :run, outcome: :park, reason: {:tool_calls, [_]}}}
 
     :ok = WardrikCore.resume(agent, %{"1" => :approve}, %{by: "maria"})
 
