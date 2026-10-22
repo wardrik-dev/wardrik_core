@@ -117,5 +117,24 @@ defmodule WardrikCore do
   def resume(agent, input, metadata \\ %{}) when is_map(metadata),
     do: GenServer.call(agent, {:resume, input, metadata})
 
+  @doc """
+  Asks an evaluation model named `questions` about `state`, from inside a turn.
+
+  Returns each question's answer under its name, as the model gives it, and what the call used.
+
+      questions = %{"urgent" => %{type: :boolean, instructions: "Is this urgent?"}}
+      {:ok, %{"urgent" => %{"probability" => p}}, usage} =
+        WardrikCore.evaluate(context, "typesafe:jev-latest", "The site is down.", questions)
+
+  Reach for this when middleware needs a model's judgement on a call.
+  """
+  @spec evaluate(Context.t(), String.t(), String.t() | map(), map()) ::
+          {:ok, map(), WardrikCore.Usage.t()} | {:error, term()}
+  def evaluate(%Context{}, model, state, questions) do
+    with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
+      {:ok, response.object, WardrikCore.Usage.from_req_llm(response, model)}
+    end
+  end
+
   defp agents(instance), do: Module.concat(instance, Agents)
 end
