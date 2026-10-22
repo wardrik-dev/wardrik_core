@@ -16,6 +16,9 @@
   the person hasn't granted yet parks the call on a `WardrikCore.Authorization`, and one a service
   refuses is reported with `WardrikCore.Credentials.refused/2`.
 - A parked turn's stop event carries why it parked.
+- `WardrikCore.Event`, which sends each event to `:telemetry` and to the agent's
+  `WardrikCore.Events` sink, for clients that follow it. Packages emit theirs the same way. Text
+  streams as `[:wardrik_core, :message, :delta]`.
 - A tool reports on its step, like what it cost, by answering with its context.
 - Every turn is a trace and every step a span, with attributes and measurements, reported as
   telemetry events.

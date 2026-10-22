@@ -39,7 +39,16 @@ defmodule WardrikCore do
     |> Map.put(:id, name)
   end
 
-  @config [:capabilities, :middleware, :timeout, :max_rounds, :principal, :credentials, :metadata]
+  @config [
+    :capabilities,
+    :middleware,
+    :timeout,
+    :max_rounds,
+    :principal,
+    :credentials,
+    :events,
+    :metadata
+  ]
 
   @doc "Starts an agent, or loads it if it was saved before."
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}

@@ -1,8 +1,8 @@
 defmodule WardrikCore.ToolRunner do
   @moduledoc false
   alias WardrikCore.Context
+  alias WardrikCore.Event
   alias WardrikCore.InDoubt
-  alias WardrikCore.Telemetry
   alias WardrikCore.Tool
   alias WardrikCore.ToolCall
 
@@ -64,7 +64,12 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp exited(context, call, reason) do
-    Telemetry.emit([:tool_call, :exit], %{agent_id: context.agent_id, call: call, reason: reason})
+    Event.emit(context, [:wardrik_core, :tool_call, :exit], %{
+      agent_id: context.agent_id,
+      call: call,
+      reason: reason
+    })
+
     {:error, {:exit, reason}}
   end
 

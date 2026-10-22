@@ -64,7 +64,6 @@ defmodule WardrikCore.MixProject do
       {:req_llm, "~> 1.28"},
       {:durable_server, "~> 0.1.6"},
       {:telemetry, "~> 1.0"},
-      {:group, "~> 0.2"},
       {:ekv, "~> 0.4.8", optional: true},
       {:mimic, "~> 2.4", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},

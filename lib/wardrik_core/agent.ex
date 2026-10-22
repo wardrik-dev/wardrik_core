@@ -4,9 +4,9 @@ defmodule WardrikCore.Agent do
   use DurableServer, vsn: 1
 
   alias WardrikCore.Agent.State
+  alias WardrikCore.Event
   alias WardrikCore.Resume
   alias WardrikCore.Span
-  alias WardrikCore.Telemetry
   alias WardrikCore.Turn
 
   @impl DurableServer
@@ -25,10 +25,15 @@ defmodule WardrikCore.Agent do
     # credo:disable-for-next-line WardrikCore.Credo.Check.NoSelfSend
     send(self(), :maybe_run)
 
-    Telemetry.emit([:agent, :start], %{system_time: System.system_time()}, %{
-      agent_id: state.agent_id,
-      state: state.state
-    })
+    Event.emit(
+      state.context,
+      [:wardrik_core, :agent, :start],
+      %{system_time: System.system_time()},
+      %{
+        agent_id: state.agent_id,
+        state: state.state
+      }
+    )
 
     {:ok, state}
   end
@@ -39,10 +44,15 @@ defmodule WardrikCore.Agent do
     message = ReqLLM.Context.user(text, metadata)
     state = %{state | pending_messages: state.pending_messages ++ [message]}
 
-    Telemetry.emit([:message, :queued], %{queued: length(state.pending_messages)}, %{
-      agent_id: state.agent_id,
-      message: message
-    })
+    Event.emit(
+      state.context,
+      [:wardrik_core, :message, :queued],
+      %{queued: length(state.pending_messages)},
+      %{
+        agent_id: state.agent_id,
+        message: message
+      }
+    )
 
     {:reply, :ok, state, {:continue, :maybe_run}, sync: true}
   end
@@ -83,9 +93,14 @@ defmodule WardrikCore.Agent do
   def handle_call(:parked, _from, state), do: {:reply, nil, state}
 
   def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state) do
-    Telemetry.emit([:turn, :checkpoint], %{calls: length(checkpoint.calls)}, %{
-      agent_id: state.agent_id
-    })
+    Event.emit(
+      state.context,
+      [:wardrik_core, :turn, :checkpoint],
+      %{calls: length(checkpoint.calls)},
+      %{
+        agent_id: state.agent_id
+      }
+    )
 
     state = %{keep_private(state, checkpoint.private) | checkpoint: checkpoint, parked: nil}
     {:reply, :ok, state, sync: true}
@@ -97,7 +112,7 @@ defmodule WardrikCore.Agent do
     do: {:reply, :ok, stop_running(state, :interrupted), {:continue, :maybe_run}, sync: true}
 
   def handle_call(:interrupt, _from, %State{state: :waiting} = state) do
-    Telemetry.emit([:turn, :dropped], %{agent_id: state.agent_id})
+    Event.emit(state.context, [:wardrik_core, :turn, :dropped], %{agent_id: state.agent_id})
     {:reply, :ok, unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 
@@ -154,7 +169,11 @@ defmodule WardrikCore.Agent do
   @impl true
   def terminate(reason, state) do
     if state.task, do: Task.shutdown(state.task, :brutal_kill)
-    Telemetry.emit([:agent, :stop], %{agent_id: state.agent_id, reason: reason})
+
+    Event.emit(state.context, [:wardrik_core, :agent, :stop], %{
+      agent_id: state.agent_id,
+      reason: reason
+    })
   end
 
   defp turn_context(state, messages, span) do
@@ -172,12 +191,17 @@ defmodule WardrikCore.Agent do
   end
 
   defp start_turn(state, kind, context, metadata \\ %{}, fun) do
-    Telemetry.emit([:turn, :start], %{system_time: System.system_time()}, %{
-      agent_id: state.agent_id,
-      span: context.span,
-      kind: kind,
-      metadata: metadata
-    })
+    Event.emit(
+      state.context,
+      [:wardrik_core, :turn, :start],
+      %{system_time: System.system_time()},
+      %{
+        agent_id: state.agent_id,
+        span: context.span,
+        kind: kind,
+        metadata: metadata
+      }
+    )
 
     task = Task.async(fun)
     arm_timeout(state.context.timeout, task)
@@ -216,8 +240,9 @@ defmodule WardrikCore.Agent do
   defp stop_turn(state, outcome), do: emit_stop(state, %{outcome: outcome})
 
   defp emit_stop(state, ended) do
-    Telemetry.emit(
-      [:turn, :stop],
+    Event.emit(
+      state.context,
+      [:wardrik_core, :turn, :stop],
       %{duration: System.monotonic_time() - state.started_at},
       Map.merge(%{agent_id: state.agent_id, span: state.span, kind: state.turn_kind}, ended)
     )

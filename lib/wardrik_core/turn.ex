@@ -1,6 +1,7 @@
 defmodule WardrikCore.Turn do
   @moduledoc false
   alias WardrikCore.Context
+  alias WardrikCore.Event
   alias WardrikCore.InDoubt
   alias WardrikCore.Resume
   alias WardrikCore.ToolRunner
@@ -175,8 +176,22 @@ defmodule WardrikCore.Turn do
   defp append_messages(context, messages),
     do: %{context | messages: context.messages ++ messages}
 
-  defp dispatch(%Context{on_chunk: handlers}, chunk),
-    do: Enum.each(handlers, fn handler -> handler.(chunk) end)
+  defp dispatch(%Context{on_chunk: handlers} = context, chunk) do
+    streamed(context, chunk)
+    Enum.each(handlers, fn handler -> handler.(chunk) end)
+  end
+
+  defp streamed(context, %ReqLLM.StreamChunk{type: type, text: text})
+       when type in [:content, :thinking] do
+    Event.emit(context, [:wardrik_core, :message, :delta], %{}, %{
+      agent_id: context.agent_id,
+      span: context.span,
+      kind: type,
+      text: text
+    })
+  end
+
+  defp streamed(_context, _chunk), do: :ok
 
   defp generate(%Context{} = context) do
     tools = Enum.map(context.tools, fn tool -> tool.req_llm end)

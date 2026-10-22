@@ -290,10 +290,48 @@ keeps its span. `WardrikCore.Span.traceparent/1` gives a span as a W3C `tracepar
 | `stop/1` | Stops the agent until it is started again |
 | `list/1`, `whereis/2` | Every saved agent's id, and the running agent for an id |
 
-## Events
+## Follow what an agent does
 
-Agents emit `:telemetry` events: messages queued, turns started and stopped, every step's start and
-stop with its span, checkpoints, and tool calls that died. `WardrikCore.Telemetry` lists them.
+Every event an agent emits goes two places: to `:telemetry`, for metrics and traces, and to the
+agent's events sink, for clients that follow it, like a CLI, a TUI or a web page. Give the agent a
+`WardrikCore.Events` module:
+
+```elixir
+defmodule MyApp.Events do
+  @behaviour WardrikCore.Events
+
+  @impl true
+  def handle_event(%WardrikCore.Event{} = event, _opts) do
+    Phoenix.PubSub.broadcast(MyApp.PubSub, "agent:#{event.metadata.agent_id}", event)
+  end
+end
+
+WardrikCore.start_agent(agent_id: "triage", model: "...", events: {MyApp.Events, []})
+```
+
+Each event names what happened, like `[:wardrik_core, :turn, :stop]`, with its measurements and
+metadata. Text streams as `[:wardrik_core, :message, :delta]` while the model writes it.
+`WardrikCore.Telemetry` lists core's events.
+
+Packages emit theirs through the same sink with `WardrikCore.Event.emit/4`, so a client hears a
+policy's decisions as well as the agent's turns.
+
+The sink runs in the agent's process, as each event happens. Keep it quick: store or send the
+event, and return. A durable log, numbering events for clients that reconnect, belongs in a
+package.
+
+## What core does, and doesn't
+
+Core runs agents durably, and gives packages seams to extend them.
+
+- **It runs agents:** turns, tools, checkpoints, parking and resuming, and carrying on after a
+  crash.
+- **It gives seams:** capabilities, middleware, tool annotations, principals, credentials, and
+  events.
+- **It leaves the rest to packages:** policy, MCP servers, storing secrets, OAuth, event logs,
+  transports like HTTP, and clients.
+
+Core changes for bugs, and for a seam no package can do without.
 
 ## License
 

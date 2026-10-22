@@ -1,6 +1,7 @@
 defmodule WardrikCore.Telemetry do
   @moduledoc """
-  Events an agent emits, each with `agent_id` in its metadata:
+  Events an agent emits, each with `agent_id` in its metadata. Each goes to `:telemetry` and to the
+  agent's `WardrikCore.Events` sink, as a `WardrikCore.Event`:
 
     * `[:wardrik_core, :agent, :start]` - `state`
     * `[:wardrik_core, :agent, :stop]` - `reason`
@@ -10,6 +11,8 @@ defmodule WardrikCore.Telemetry do
       gives `parked/1`; measures `duration`
     * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
     * `[:wardrik_core, :turn, :dropped]`
+    * `[:wardrik_core, :message, :delta]` - `span`, `kind` (`:content` or `:thinking`), and the
+      `text` the model streamed
     * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`
     * `[:wardrik_core, :step, :start]` - `step`, `span`
     * `[:wardrik_core, :step, :stop]` - `step`, `span`, `status`, `attributes`, and the `response`
@@ -21,11 +24,8 @@ defmodule WardrikCore.Telemetry do
   """
 
   alias WardrikCore.Context
+  alias WardrikCore.Event
   alias WardrikCore.Span
-
-  @spec emit([atom()], map(), map()) :: :ok
-  def emit(event, measurements \\ %{}, metadata),
-    do: :telemetry.execute([:wardrik_core | event], measurements, metadata)
 
   @doc false
   @spec span(Context.t(), Context.step(), WardrikCore.Middleware.next()) ::
@@ -34,10 +34,34 @@ defmodule WardrikCore.Telemetry do
     inner = %{context | step: step, span: child(context, step), attributes: principals(context)}
     start = %{agent_id: inner.agent_id, span: inner.span, step: step}
 
-    :telemetry.span([:wardrik_core, :step], start, fn ->
+    began = System.monotonic_time()
+
+    Event.emit(
+      context,
+      [:wardrik_core, :step, :start],
+      %{system_time: System.system_time()},
+      start
+    )
+
+    try do
       result = fun.(inner)
-      {result, measured(result, context), Map.merge(start, ended(result))}
-    end)
+      measured = Map.put(measured(result, context), :duration, System.monotonic_time() - began)
+
+      Event.emit(
+        context,
+        [:wardrik_core, :step, :stop],
+        measured,
+        Map.merge(start, ended(result))
+      )
+
+      result
+    catch
+      kind, reason ->
+        failed = Map.merge(start, %{kind: kind, reason: reason, stacktrace: __STACKTRACE__})
+        duration = %{duration: System.monotonic_time() - began}
+        Event.emit(context, [:wardrik_core, :step, :exception], duration, failed)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
   end
 
   defp principals(context) do
