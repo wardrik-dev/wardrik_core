@@ -1,6 +1,7 @@
 defmodule WardrikCore do
   @moduledoc """
-  Durable agents that run a model and its tools in a loop, and survive a crash.
+  A durable agent runtime: agents that survive a crash, wait for a person, and run every call
+  through your code.
 
       children = [
         {EKV, name: :agents_store, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
