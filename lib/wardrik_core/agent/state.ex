@@ -1,20 +1,12 @@
 defmodule WardrikCore.Agent.State do
-  @moduledoc """
-  Represents the state of an agent in the Wardric system. This module handles
-  state transitions and returns effects for callers to act upon as needed.
-  """
+  @moduledoc false
 
   @type t() :: %__MODULE__{}
-  @type state :: :idle | :due | :running | :waiting | :asleep
-
-  # @recent_message_id_buffer 256
+  @type state :: :idle | :due | :running | :waiting
 
   defstruct [
-    :uuid,
     :agent_id,
     :model,
-    :recent_message_ids,
-    :last_run_at,
     :context,
     :task,
     :started_at,
@@ -28,11 +20,8 @@ defmodule WardrikCore.Agent.State do
   ]
 
   @persisted [
-    :uuid,
     :agent_id,
     :model,
-    :recent_message_ids,
-    :last_run_at,
     :messages,
     :pending_messages,
     :in_flight,

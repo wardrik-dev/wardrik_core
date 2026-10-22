@@ -42,7 +42,13 @@ defmodule WardrikCore.ToolRunnerTest do
       tool("slow", fn _args, _context -> receive do: (:never -> :ok) end, timeout: 50)
     ]
 
-    %{context: Context.new(tools: tools, metadata: %{test: self()})}
+    context =
+      Context.new(
+        tools: tools,
+        metadata: %{test: self()}
+      )
+
+    %{context: context}
   end
 
   test "answers each call in order", %{context: context} do

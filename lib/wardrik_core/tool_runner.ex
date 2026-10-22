@@ -1,7 +1,5 @@
 defmodule WardrikCore.ToolRunner do
-  @moduledoc """
-  Runs a batch of tool calls concurrently.
-  """
+  @moduledoc false
   alias ReqLLM.ToolCall
   alias WardrikCore.Context
   alias WardrikCore.Telemetry
@@ -19,9 +17,8 @@ defmodule WardrikCore.ToolRunner do
   def run(%Context{} = context, calls, opts \\ []) do
     resume = Keyword.get(opts, :resume, %{})
 
-    WardrikCore.TaskSupervisor
-    |> Task.Supervisor.async_stream(
-      calls,
+    calls
+    |> Task.async_stream(
       &call(%{context | resume: Map.get(resume, &1.id)}, &1),
       ordered: true,
       max_concurrency: Keyword.get(opts, :max_concurrency, @max_concurrency),

@@ -1,7 +1,5 @@
 defmodule WardrikCore.Turn do
-  @moduledoc """
-  One turn of the loop.
-  """
+  @moduledoc false
   alias WardrikCore.Context
   alias WardrikCore.ToolRunner
 
@@ -36,7 +34,7 @@ defmodule WardrikCore.Turn do
         %Context{} = context,
         %{messages: messages, calls: calls, rounds: rounds} = checkpoint
       ) do
-    metadata = Map.merge(context.metadata, Map.get(checkpoint, :metadata, %{}))
+    metadata = Map.merge(context.metadata, checkpoint.metadata)
     context = %{with_tools(context) | messages: messages, metadata: metadata}
 
     Context.run(context, :turn, fn context ->

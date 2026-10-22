@@ -297,6 +297,13 @@ defmodule WardrikCore.AgentTest do
     assert [%{metadata: %{from: "jon"}}, _answer] = WardrikCore.history(agent)
   end
 
+  test "whereis/1 finds a running agent by id" do
+    {id, agent} = start_agent()
+
+    assert ^agent = WardrikCore.whereis(id)
+    assert nil == WardrikCore.whereis("no-such-agent")
+  end
+
   test "an unknown cast is ignored" do
     {_id, agent} = start_agent()
 
@@ -334,7 +341,7 @@ defmodule WardrikCore.AgentTest do
     {id, opts} =
       Keyword.pop_lazy(opts, :agent_id, fn -> "agent-#{System.unique_integer([:positive])}" end)
 
-    {:ok, {agent, _}} =
+    {:ok, agent} =
       [agent_id: id, model: "anthropic:claude-haiku-4-5", capabilities: [Echo]]
       |> Keyword.merge(opts)
       |> WardrikCore.start_agent()

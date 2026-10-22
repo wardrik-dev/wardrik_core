@@ -1,7 +1,5 @@
 defmodule WardrikCore.Agent do
-  @moduledoc """
-  A Durable Agent Process.
-  """
+  @moduledoc false
   require Logger
   use DurableServer, vsn: 1
 
@@ -53,7 +51,7 @@ defmodule WardrikCore.Agent do
 
   def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
     context = turn_context(state, parked.messages)
-    context = %{context | metadata: Map.merge(context.metadata, Map.get(parked, :metadata, %{}))}
+    context = %{context | metadata: Map.merge(context.metadata, parked.metadata)}
 
     {:reply, :ok,
      start_turn(state, :resume, fn -> Turn.resume(context, parked.reason, input) end)}
@@ -158,7 +156,7 @@ defmodule WardrikCore.Agent do
       kind: kind
     })
 
-    task = Task.Supervisor.async(WardrikCore.TaskSupervisor, fun)
+    task = Task.async(fun)
     arm_timeout(state.context.timeout, task)
     %{state | state: :running, task: task, turn_kind: kind, started_at: System.monotonic_time()}
   end
