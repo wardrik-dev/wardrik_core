@@ -25,16 +25,7 @@ defmodule WardrikCore.Agent do
     # credo:disable-for-next-line WardrikCore.Credo.Check.NoSelfSend
     send(self(), :maybe_run)
 
-    Event.emit(
-      state.context,
-      [:wardrik_core, :agent, :start],
-      %{system_time: System.system_time()},
-      %{
-        agent_id: state.agent_id,
-        state: state.state
-      }
-    )
-
+    emit(state, [:agent, :start], %{system_time: System.system_time()}, %{state: state.state})
     {:ok, state}
   end
 
@@ -42,36 +33,26 @@ defmodule WardrikCore.Agent do
   def handle_call({:ask, text, metadata}, _from, %State{} = state) do
     if state.state == :running, do: Turn.yield(state.task.pid)
     message = ReqLLM.Context.user(text, metadata)
-    state = %{state | pending_messages: state.pending_messages ++ [message]}
+    state = State.queue(state, message)
 
-    Event.emit(
-      state.context,
-      [:wardrik_core, :message, :queued],
-      %{queued: length(state.pending_messages)},
-      %{
-        agent_id: state.agent_id,
-        message: message
-      }
-    )
+    emit(state, [:message, :queued], %{queued: length(state.pending_messages)}, %{
+      message: message
+    })
 
     {:reply, :ok, state, {:continue, :maybe_run}, sync: true}
   end
 
-  def handle_call({:configure, opts}, _from, state) do
-    {model, settings} = Keyword.pop(opts, :model, state.model)
-    state = %{state | model: model, context: struct!(state.context, settings)}
-    {:reply, :ok, state, sync: true}
-  end
+  def handle_call({:configure, opts}, _from, state),
+    do: {:reply, :ok, State.configure(state, opts), sync: true}
 
   def handle_call(:history, _from, state), do: {:reply, state.messages, state}
   def handle_call(:status, _from, state), do: {:reply, state.state, state}
   def handle_call(:stop, _from, state), do: {:stop, :permanent, :ok, state}
 
-  def handle_call(
-        {:resume, input, metadata},
-        _from,
-        %State{state: :waiting, parked: parked} = state
-      ) do
+  def handle_call({:resume, input, metadata}, _from, %State{state: :waiting} = state) do
+    parked = state.parked
+    resume = %Resume{reason: parked.reason, input: input, metadata: metadata}
+
     context = %{
       turn_context(state, parked.messages, parked.span)
       | metadata: Map.merge(state.context.metadata, parked.metadata),
@@ -79,9 +60,7 @@ defmodule WardrikCore.Agent do
     }
 
     {:reply, :ok,
-     start_turn(state, :resume, context, metadata, fn ->
-       Turn.resume(context, %Resume{reason: parked.reason, input: input, metadata: metadata})
-     end)}
+     start_turn(state, :resume, context, metadata, fn -> Turn.resume(context, resume) end)}
   end
 
   def handle_call({:resume, _input, _metadata}, _from, state),
@@ -93,17 +72,8 @@ defmodule WardrikCore.Agent do
   def handle_call(:parked, _from, state), do: {:reply, nil, state}
 
   def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state) do
-    Event.emit(
-      state.context,
-      [:wardrik_core, :turn, :checkpoint],
-      %{calls: length(checkpoint.calls)},
-      %{
-        agent_id: state.agent_id
-      }
-    )
-
-    state = %{keep_private(state, checkpoint.private) | checkpoint: checkpoint, parked: nil}
-    {:reply, :ok, state, sync: true}
+    emit(state, [:turn, :checkpoint], %{calls: length(checkpoint.calls)}, %{})
+    {:reply, :ok, State.checkpointed(state, checkpoint), sync: true}
   end
 
   def handle_call({:checkpoint, _checkpoint}, _from, state), do: {:reply, :stale, state}
@@ -112,8 +82,8 @@ defmodule WardrikCore.Agent do
     do: {:reply, :ok, stop_running(state, :interrupted), {:continue, :maybe_run}, sync: true}
 
   def handle_call(:interrupt, _from, %State{state: :waiting} = state) do
-    Event.emit(state.context, [:wardrik_core, :turn, :dropped], %{agent_id: state.agent_id})
-    {:reply, :ok, unanswered(state), {:continue, :maybe_run}, sync: true}
+    emit(state, [:turn, :dropped], %{}, %{})
+    {:reply, :ok, State.unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 
   def handle_call(:interrupt, _from, state), do: {:reply, {:error, :idle}, state}
@@ -131,9 +101,8 @@ defmodule WardrikCore.Agent do
   end
 
   def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
-    {batch, rest} = State.next_batch(state.pending_messages)
+    {batch, state} = State.take_batch(state)
     context = turn_context(state, state.messages ++ batch, Span.root())
-    state = %{state | in_flight: batch, pending_messages: rest}
     {:noreply, start_turn(state, :run, context, fn -> Turn.run(context) end)}
   end
 
@@ -144,14 +113,13 @@ defmodule WardrikCore.Agent do
 
   def handle_info({ref, result}, %State{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    stop_turn(state, result)
-    {:noreply, finished(state, result), {:continue, :maybe_run}, sync: true}
+    {:noreply, finish(state, result), {:continue, :maybe_run}, sync: true}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %State{task: %Task{ref: ref}} = state) do
     Logger.error("Turn crashed for agent #{state.agent_id}: #{inspect(reason)}")
-    stop_turn(state, :crash)
-    {:noreply, unanswered(state), {:continue, :maybe_run}, sync: true}
+    stop_turn(state, %{outcome: :crash})
+    {:noreply, State.unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 
   def handle_info({:turn_timeout, ref}, %State{task: %Task{ref: ref}} = state),
@@ -169,11 +137,7 @@ defmodule WardrikCore.Agent do
   @impl true
   def terminate(reason, state) do
     if state.task, do: Task.shutdown(state.task, :brutal_kill)
-
-    Event.emit(state.context, [:wardrik_core, :agent, :stop], %{
-      agent_id: state.agent_id,
-      reason: reason
-    })
+    emit(state, [:agent, :stop], %{}, %{reason: reason})
   end
 
   defp turn_context(state, messages, span) do
@@ -191,29 +155,12 @@ defmodule WardrikCore.Agent do
   end
 
   defp start_turn(state, kind, context, metadata \\ %{}, fun) do
-    Event.emit(
-      state.context,
-      [:wardrik_core, :turn, :start],
-      %{system_time: System.system_time()},
-      %{
-        agent_id: state.agent_id,
-        span: context.span,
-        kind: kind,
-        metadata: metadata
-      }
-    )
+    started = %{span: context.span, kind: kind, metadata: metadata}
+    emit(state, [:turn, :start], %{system_time: System.system_time()}, started)
 
     task = Task.async(fun)
     arm_timeout(state.context.timeout, task)
-
-    %{
-      state
-      | state: :running,
-        task: task,
-        turn_kind: kind,
-        span: context.span,
-        started_at: System.monotonic_time()
-    }
+    State.running(state, task, kind, context.span)
   end
 
   defp arm_timeout(:infinity, _task), do: :ok
@@ -222,76 +169,44 @@ defmodule WardrikCore.Agent do
   defp stop_running(state, outcome) do
     case Task.shutdown(state.task, :brutal_kill) do
       {:ok, result} ->
-        stop_turn(state, result)
-        finished(state, result)
+        finish(state, result)
 
       _stopped ->
-        stop_turn(state, outcome)
-        unanswered(state)
+        stop_turn(state, %{outcome: outcome})
+        State.unanswered(state)
     end
   end
 
-  defp stop_turn(state, {:park, reason, _context}),
-    do: emit_stop(state, %{outcome: :park, reason: reason})
+  defp finish(state, result) do
+    stop_turn(state, ended(result))
+    log_ended(state, result)
+    State.finished(state, result)
+  end
 
-  defp stop_turn(state, result) when is_tuple(result),
-    do: emit_stop(state, %{outcome: elem(result, 0)})
+  defp ended({:park, reason, _context}), do: %{outcome: :park, reason: reason}
+  defp ended(result), do: %{outcome: elem(result, 0)}
 
-  defp stop_turn(state, outcome), do: emit_stop(state, %{outcome: outcome})
+  defp log_ended(state, {:park, reason, _context}),
+    do: Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
 
-  defp emit_stop(state, ended) do
-    Event.emit(
-      state.context,
-      [:wardrik_core, :turn, :stop],
-      %{duration: System.monotonic_time() - state.started_at},
-      Map.merge(%{agent_id: state.agent_id, span: state.span, kind: state.turn_kind}, ended)
+  defp log_ended(state, {:error, reason}),
+    do: Logger.error("Turn failed for agent #{state.agent_id}: #{inspect(reason)}")
+
+  defp log_ended(_state, {:ok, _context}), do: :ok
+
+  defp stop_turn(state, ended) do
+    measured = %{duration: System.monotonic_time() - state.started_at}
+
+    emit(
+      state,
+      [:turn, :stop],
+      measured,
+      Map.merge(%{span: state.span, kind: state.turn_kind}, ended)
     )
   end
 
-  defp finished(state, {:ok, context}),
-    do: %{
-      keep_private(state, context.private)
-      | state: :idle,
-        task: nil,
-        parked: nil,
-        checkpoint: nil,
-        in_flight: [],
-        messages: context.messages
-    }
-
-  defp finished(state, {:park, reason, context}) do
-    Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
-
-    %{
-      keep_private(state, context.private)
-      | state: :waiting,
-        task: nil,
-        checkpoint: nil,
-        parked: %{
-          reason: reason,
-          messages: context.messages,
-          metadata: context.metadata,
-          span: context.span,
-          measurements: context.measurements
-        }
-    }
+  defp emit(state, event, measurements, metadata) do
+    metadata = Map.put(metadata, :agent_id, state.agent_id)
+    Event.emit(state.context, [:wardrik_core | event], measurements, metadata)
   end
-
-  defp finished(state, {:error, reason}) do
-    Logger.error("Turn failed for agent #{state.agent_id}: #{inspect(reason)}")
-    unanswered(state)
-  end
-
-  defp keep_private(state, private), do: put_in(state.context.private, private)
-
-  defp unanswered(state),
-    do: %{
-      state
-      | state: :idle,
-        task: nil,
-        parked: nil,
-        checkpoint: nil,
-        in_flight: [],
-        messages: state.messages ++ state.in_flight
-    }
 end

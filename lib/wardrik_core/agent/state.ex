@@ -61,6 +61,87 @@ defmodule WardrikCore.Agent.State do
     struct!(__MODULE__, opts)
   end
 
+  @doc "Adds a message to the queue."
+  @spec queue(t(), ReqLLM.Message.t()) :: t()
+  def queue(%__MODULE__{} = state, message),
+    do: %{state | pending_messages: state.pending_messages ++ [message]}
+
+  @doc "Takes the next batch off the queue, as the messages in flight."
+  @spec take_batch(t()) :: {[ReqLLM.Message.t()], t()}
+  def take_batch(%__MODULE__{} = state) do
+    {batch, rest} = next_batch(state.pending_messages)
+    {batch, %{state | in_flight: batch, pending_messages: rest}}
+  end
+
+  @doc "Replaces the model or settings, from the next turn."
+  @spec configure(t(), keyword()) :: t()
+  def configure(%__MODULE__{} = state, opts) do
+    {model, settings} = Keyword.pop(opts, :model, state.model)
+    %{state | model: model, context: struct!(state.context, settings)}
+  end
+
+  @doc "Marks a turn running in `task`."
+  @spec running(t(), Task.t(), atom(), WardrikCore.Span.t()) :: t()
+  def running(%__MODULE__{} = state, task, kind, span),
+    do: %{
+      state
+      | state: :running,
+        task: task,
+        turn_kind: kind,
+        span: span,
+        started_at: System.monotonic_time()
+    }
+
+  @doc "Keeps a running turn's checkpoint, and the private data it saved."
+  @spec checkpointed(t(), map()) :: t()
+  def checkpointed(%__MODULE__{} = state, checkpoint),
+    do: %{keep_private(state, checkpoint.private) | checkpoint: checkpoint, parked: nil}
+
+  @doc "Takes what a turn ended with: answered, parked, or failed."
+  @spec finished(t(), WardrikCore.Middleware.result()) :: t()
+  def finished(%__MODULE__{} = state, {:ok, context}),
+    do: %{
+      keep_private(state, context.private)
+      | state: :idle,
+        task: nil,
+        parked: nil,
+        checkpoint: nil,
+        in_flight: [],
+        messages: context.messages
+    }
+
+  def finished(%__MODULE__{} = state, {:park, reason, context}),
+    do: %{
+      keep_private(state, context.private)
+      | state: :waiting,
+        task: nil,
+        checkpoint: nil,
+        parked: %{
+          reason: reason,
+          messages: context.messages,
+          metadata: context.metadata,
+          span: context.span,
+          measurements: context.measurements
+        }
+    }
+
+  def finished(%__MODULE__{} = state, {:error, _reason}), do: unanswered(state)
+
+  @doc "Drops the turn, keeping the messages it was answering in the history."
+  @spec unanswered(t()) :: t()
+  def unanswered(%__MODULE__{} = state),
+    do: %{
+      state
+      | state: :idle,
+        task: nil,
+        parked: nil,
+        checkpoint: nil,
+        in_flight: [],
+        messages: state.messages ++ state.in_flight
+    }
+
+  defp keep_private(state, private), do: put_in(state.context.private, private)
+
   @doc "A plain, serializable map of what survives a restart. See `load/1`."
   @spec dump(t()) :: map()
   def dump(%__MODULE__{} = state) do
