@@ -1,13 +1,22 @@
 defmodule WardrikCore.Middleware do
   @moduledoc """
-  Middleware extension point for WardrikCore
+  Wraps every step of a turn: the turn itself, each model call, and each tool call.
 
-  Example uses:
-    - Modifying system prompts.
-    - Injecting telemetry.
-    - Adding custom logging.
-    - Enforcing compliance.
+      defmodule MyApp.NoShell do
+        @behaviour WardrikCore.Middleware
 
+        @impl true
+        def call(%{step: {:tool_call, %{name: "shell"}}} = context, _next, _opts),
+          do: {:ok, %{context | response: {:error, "No shell."}}}
+
+        def call(context, next, _opts), do: next.(context)
+      end
+
+  Call `next` to carry on. To answer the step yourself, return `{:ok, context}`. Return
+  `{:park, reason, context}` to wait for a person, or `{:error, reason}` to end the step.
+
+  Reach for this when every call needs the same treatment: policy, tracing, retries, a system
+  prompt.
   """
   alias WardrikCore.Context
   @type context :: Context.t()

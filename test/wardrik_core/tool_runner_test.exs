@@ -39,7 +39,9 @@ defmodule WardrikCore.ToolRunnerTest do
       tool("die", fn _args, _context -> exit(:boom) end),
       tool("raise", fn _args, _context -> raise "kaput" end),
       tool("hang", fn _args, _context -> receive do: (:never -> :ok) end),
-      tool("slow", fn _args, _context -> receive do: (:never -> :ok) end, timeout: 50)
+      tool("slow", fn _args, _context -> receive do: (:never -> :ok) end,
+        annotations: [timeout: 50]
+      )
     ]
 
     context =
@@ -158,6 +160,19 @@ defmodule WardrikCore.ToolRunnerTest do
              ToolRunner.messages(results)
   end
 
+  test "a tool reports on its step through the context, even when it fails", %{context: context} do
+    enrich = fn _args, context -> {:ok, "found", Context.measure(context, :usd, 0.01)} end
+    charge = fn _args, context -> {:error, "declined", Context.measure(context, :usd, 0.02)} end
+    context = %{context | tools: [tool("enrich", enrich), tool("charge", charge)]}
+
+    calls = [call("1", "enrich"), call("2", "charge")]
+
+    assert {[{_, {:ok, "found"}}, {_, {:error, "declined"}}], %Context{measurements: measured}} =
+             ToolRunner.run(context, calls)
+
+    assert_in_delta measured.usd, 0.03, 1.0e-9
+  end
+
   defp run(context, calls, opts \\ []) do
     {results, _context} = ToolRunner.run(context, calls, opts)
     results
@@ -169,7 +184,7 @@ defmodule WardrikCore.ToolRunnerTest do
       description: name,
       schema: [text: [type: :string]],
       run: run,
-      timeout: opts[:timeout]
+      annotations: Keyword.get(opts, :annotations, [])
     )
   end
 

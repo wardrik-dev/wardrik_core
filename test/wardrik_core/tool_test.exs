@@ -24,6 +24,27 @@ defmodule WardrikCore.ToolTest do
     assert 2 = Tool.get_private(tool, MyPackage)
   end
 
+  test "annotate/2 adds facts any package can read", %{tool: tool} do
+    tool = Tool.annotate(tool, read_only: true, timeout: 50)
+
+    assert true == Tool.annotation(tool, :read_only)
+    assert 50 == Tool.annotation(tool, :timeout)
+    assert nil == Tool.annotation(tool, :idempotent)
+    assert false == Tool.annotation(tool, :idempotent, false)
+  end
+
+  test "new!/1 takes annotations" do
+    tool =
+      Tool.new!(
+        name: "echo",
+        description: "echo",
+        run: fn _, _ -> {:ok, ""} end,
+        annotations: [idempotent: true]
+      )
+
+    assert true == Tool.annotation(tool, :idempotent)
+  end
+
   test "rejects options it doesn't know" do
     assert_raise KeyError, fn ->
       Tool.new!(name: "echo", description: "echo", run: fn _, _ -> {:ok, ""} end, meta: %{})

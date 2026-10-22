@@ -68,14 +68,19 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp execute(%Context{step: {:tool_call, call}, tools: tools} = context),
-    do: {:ok, %{context | response: Tool.call(tools, call, context)}}
+    do: {:ok, answered(context, Tool.call(tools, call, context))}
+
+  defp answered(_context, {tag, output, %Context{} = context}) when tag in [:ok, :error],
+    do: answered(context, {tag, output})
+
+  defp answered(context, answer), do: %{context | response: answer}
 
   defp timeout(tools, calls) do
     names = MapSet.new(calls, & &1.name)
 
     tools
     |> Enum.filter(&(&1.name in names))
-    |> Enum.map(fn tool -> tool.timeout || @timeout end)
+    |> Enum.map(&Tool.annotation(&1, :timeout, @timeout))
     |> Enum.max(fn -> @timeout end)
   end
 

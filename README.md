@@ -33,6 +33,9 @@ Notice `ask/3` returns once the message is stored. If the node dies mid-turn, th
 message back up when it starts again. A turn lost while its tools ran carries on from its last
 checkpoint, without asking the model again.
 
+In tests, start `{WardrikCore.Backends.MemoryStore, name: :agents_store}` in EKV's place and name
+it as the backend. It keeps agents in memory, so they're gone when the node stops.
+
 `start_agent/2` also takes `capabilities`, `middleware`, `metadata`, a turn's `timeout`
 (`:infinity` unless set), and `max_rounds`, the model calls a turn may make (25 unless set).
 
