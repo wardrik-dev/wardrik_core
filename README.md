@@ -30,7 +30,11 @@ Supervisor.start_link(children, strategy: :rest_for_one)
 ```
 
 Notice `ask/3` returns once the message is stored. If the node dies mid-turn, the agent picks the
-message back up when it starts again.
+message back up when it starts again. A turn lost while its tools ran carries on from its last
+checkpoint, without asking the model again.
+
+`start_agent/2` also takes `capabilities`, `middleware`, `metadata`, a turn's `timeout`
+(`:infinity` unless set), and `max_rounds`, the model calls a turn may make (25 unless set).
 
 ## Give it tools
 
@@ -69,43 +73,81 @@ an error, and the turn carries on.
 
 ## Wrap every call
 
-Middleware sees each turn, model call and tool call, as `context.step`. Here's one that asks a
-person before any tool runs:
+Middleware sees each turn, model call and tool call, as `context.step`. It calls `next` to carry
+on, or answers the step itself. Here's one that refuses the shell:
+
+```elixir
+defmodule MyApp.NoShell do
+  @behaviour WardrikCore.Middleware
+
+  @impl true
+  def call(%{step: {:tool_call, %{name: "shell"}}} = context, _next, _opts),
+    do: {:ok, %{context | response: {:error, "No shell."}}}
+
+  def call(context, next, _opts), do: next.(context)
+end
+```
+
+A refusal is the call's answer. The model sees it as the call's error, and carries on.
+
+Middleware can also park a call until a person answers. This one asks before any tool runs:
 
 ```elixir
 defmodule MyApp.Approve do
   @behaviour WardrikCore.Middleware
 
-  alias WardrikCore.{Context, Resume}
-
   @impl true
-  def call(
-        %Context{step: {:tool_call, call}, resume: %Resume{reason: :approval, input: decisions}} =
-          context,
-        next,
-        _opts
-      ) do
-    case Map.get(decisions, call.id) do
+  def call(%{step: {:tool_call, call}} = context, next, _opts) do
+    case answer(context, call) do
       :approve -> next.(context)
-      {:deny, reason} -> {:error, reason}
+      {:deny, reason} -> {:ok, %{context | response: {:error, reason}}}
       nil -> {:park, :approval, context}
     end
   end
 
-  def call(%Context{step: {:tool_call, _call}} = context, _next, _opts), do: {:park, :approval, context}
   def call(context, next, _opts), do: next.(context)
+
+  defp answer(%{resume: %{input: answers}}, call), do: Map.get(answers, call.id)
+  defp answer(_context, _call), do: nil
 end
 ```
 
-The turn parks until we resume it:
+The turn waits until we resume it, with an answer for each call. Say who answered as the metadata,
+and it's on the resumed turn's start event:
 
 ```elixir
 {:tool_calls, calls} = WardrikCore.parked(agent)
-WardrikCore.resume(agent, %{"call_1" => :approve})
+WardrikCore.resume(agent, %{"call_1" => :approve}, %{by: "maria"})
 ```
+
+Middleware can keep state with the agent, like a count or what it spent, with
+`Context.put_private/3` under its own module's name. It's saved with the agent, so it survives
+restarts. When middleware needs a model's judgement on a call, `WardrikCore.evaluate/4` asks an
+evaluation model.
 
 Reach for middleware when every call needs the same treatment: policy, tracing, retries, a system
 prompt. Like capabilities, it takes options as `{MyApp.Approve, opts}`.
+
+## Trace every step
+
+A turn is a trace, and each model call and tool call is a span beneath it, as OpenTelemetry has
+them. Middleware adds to the step it's in:
+
+```elixir
+def call(%Context{step: {:tool_call, call}} = context, next, _opts) do
+  context
+  |> Context.attribute("gen_ai.tool.name", call.name)
+  |> Context.measure(:usd, 0.002)
+  |> next.()
+end
+```
+
+Each step reports its attributes and what it measured when it ends. Measurements add up over the
+turn, and core measures every model call's `input_tokens` and `output_tokens`, and its `usd` when
+the model has a price in dollars.
+
+A turn keeps its trace through a park or a restart, and a tool call that runs again after a restart
+keeps its span. `WardrikCore.Span.traceparent/1` gives a span as a W3C `traceparent` header.
 
 ## Control a running agent
 
@@ -113,7 +155,7 @@ prompt. Like capabilities, it takes options as `{MyApp.Approve, opts}`.
 | --- | --- |
 | `ask/3` | Queues a message; a running turn ends at its next step and the next turn answers it |
 | `interrupt/1` | Stops the running or parked turn |
-| `resume/2` | Re-enters a parked turn |
+| `resume/3` | Re-enters a parked turn, with who answered as its metadata |
 | `status/1`, `history/1`, `parked/1` | What the agent is doing, has said, and waits on |
 | `configure/2` | Replaces the model or settings, from the next turn |
 | `stop/1` | Stops the agent until it is started again |
@@ -121,8 +163,8 @@ prompt. Like capabilities, it takes options as `{MyApp.Approve, opts}`.
 
 ## Events
 
-Agents emit `:telemetry` events for their lifecycle: messages queued, turns started and stopped,
-checkpoints, and tool calls that died. `WardrikCore.Telemetry` lists them.
+Agents emit `:telemetry` events: messages queued, turns started and stopped, every step's start and
+stop with its span, checkpoints, and tool calls that died. `WardrikCore.Telemetry` lists them.
 
 ## License
 

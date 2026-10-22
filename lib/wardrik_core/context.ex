@@ -11,7 +11,6 @@ defmodule WardrikCore.Context do
   `WardrikCore.Telemetry`. A step that returns `{:error, reason}` reports neither.
   """
   use WardrikCore.Private
-  alias WardrikCore.Turn
 
   @type step :: :turn | :generate | {:tool_call, WardrikCore.ToolCall.t()} | {:step, String.t()}
   @type entry :: module() | {module(), term()}
@@ -28,7 +27,7 @@ defmodule WardrikCore.Context do
           max_rounds: pos_integer(),
           timeout: timeout(),
           resume: WardrikCore.Resume.t() | nil,
-          checkpoint: (Turn.checkpoint() -> :ok) | nil,
+          checkpoint: (map() -> :ok) | nil,
           on_chunk: [(ReqLLM.StreamChunk.t() -> any())],
           private: map(),
           metadata: map(),
