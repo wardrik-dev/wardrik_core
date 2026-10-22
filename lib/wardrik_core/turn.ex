@@ -5,6 +5,13 @@ defmodule WardrikCore.Turn do
   alias WardrikCore.Context
   alias WardrikCore.ToolRunner
 
+  @typedoc "A batch of tool calls about to run, and where the turn stood when it asked for them."
+  @type checkpoint :: %{
+          messages: [ReqLLM.Message.t()],
+          calls: [ReqLLM.ToolCall.t()],
+          rounds: non_neg_integer()
+        }
+
   @spec run(Context.t()) :: WardrikCore.Middleware.result()
   def run(%Context{} = context) do
     context
@@ -13,14 +20,24 @@ defmodule WardrikCore.Turn do
   end
 
   @doc """
-  Re-enters a turn where it parked. The step that parked runs again with
-  `context.resume` set to `{reason, input}`; parked tool calls each with their
-  own reason. What its middleware returns decides what happens next.
+  Re-enters a turn where it parked.
   """
   @spec resume(Context.t(), term(), term()) :: WardrikCore.Middleware.result()
   def resume(%Context{} = context, reason, input) do
     context = %{with_tools(context) | resume: {reason, input}}
     Context.run(context, :turn, fn context -> reenter(context, reason, input) end)
+  end
+
+  @doc """
+  Carries on a turn lost while its tools ran, from the checkpoint it saved.
+  """
+  @spec recover(Context.t(), checkpoint()) :: WardrikCore.Middleware.result()
+  def recover(%Context{} = context, %{messages: messages, calls: calls, rounds: rounds}) do
+    context = %{with_tools(context) | messages: messages}
+
+    Context.run(context, :turn, fn context ->
+      continue(context, ToolRunner.run(context, calls), rounds)
+    end)
   end
 
   defp reenter(context, {:tool_calls, results}, input) do
@@ -63,10 +80,18 @@ defmodule WardrikCore.Turn do
 
       case ReqLLM.Response.tool_calls(context.response) do
         [] -> {:ok, context}
-        calls -> continue(context, ToolRunner.run(context, calls), rounds)
+        calls -> run_tools(context, calls, rounds)
       end
     end
   end
+
+  defp run_tools(context, calls, rounds) do
+    :ok = save_checkpoint(context, %{messages: context.messages, calls: calls, rounds: rounds})
+    continue(context, ToolRunner.run(context, calls), rounds)
+  end
+
+  defp save_checkpoint(%Context{checkpoint: nil}, _checkpoint), do: :ok
+  defp save_checkpoint(%Context{checkpoint: save}, checkpoint), do: save.(checkpoint)
 
   defp continue(context, results, rounds) do
     if any_parked?(results) do

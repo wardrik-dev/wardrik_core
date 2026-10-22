@@ -68,6 +68,18 @@ defmodule WardrikCore.Agent.StateTest do
                state |> State.dump() |> State.load()
     end
 
+    test "a turn that checkpointed a batch comes back due to recover it", %{state: state} do
+      checkpoint = %{messages: [:asked], calls: [], rounds: 3}
+      state = %{state | checkpoint: checkpoint, in_flight: [:taken], pending_messages: [:queued]}
+
+      assert %State{
+               state: :due,
+               checkpoint: ^checkpoint,
+               in_flight: [:taken],
+               pending_messages: [:queued]
+             } = state |> State.dump() |> State.load()
+    end
+
     test "loads a state saved with fields that have since been removed", %{state: state} do
       dumped = State.dump(state)
       dumped = %{dumped | context: Map.put(dumped.context, :removed_field, true)}

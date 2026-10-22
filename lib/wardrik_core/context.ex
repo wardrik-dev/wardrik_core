@@ -2,6 +2,7 @@ defmodule WardrikCore.Context do
   @moduledoc """
   The token threaded through a turn's middleware, like a `Req.Request`.
   """
+  alias WardrikCore.Turn
 
   @type step :: :turn | :generate | {:tool_call, ReqLLM.ToolCall.t()}
 
@@ -17,6 +18,7 @@ defmodule WardrikCore.Context do
           middleware: [module()],
           max_rounds: pos_integer(),
           resume: {reason :: term(), input :: term()} | nil,
+          checkpoint: (Turn.checkpoint() -> :ok) | nil,
           metadata: map()
         }
 
@@ -25,8 +27,8 @@ defmodule WardrikCore.Context do
     :model,
     :step,
     :response,
-    # Set while a parked turn is re-entered: why it parked, and what resumed it.
     :resume,
+    :checkpoint,
     messages: [],
     capabilities: [],
     tools: [],

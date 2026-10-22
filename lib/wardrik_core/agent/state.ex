@@ -19,6 +19,7 @@ defmodule WardrikCore.Agent.State do
     :task,
     :started_at,
     :parked,
+    :checkpoint,
     state: :idle,
     messages: [],
     pending_messages: [],
@@ -33,7 +34,8 @@ defmodule WardrikCore.Agent.State do
     :last_run_at,
     :messages,
     :pending_messages,
-    :in_flight
+    :in_flight,
+    :checkpoint
   ]
   @persisted_context [
     :capabilities,
@@ -61,6 +63,7 @@ defmodule WardrikCore.Agent.State do
     |> Map.merge(requeued(state))
   end
 
+  defp requeued(%__MODULE__{state: :running, checkpoint: %{}}), do: %{state: :due}
   defp requeued(%__MODULE__{state: :running, parked: %{}}), do: %{state: :waiting}
 
   defp requeued(%__MODULE__{state: :running} = state),

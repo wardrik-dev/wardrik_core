@@ -6,6 +6,26 @@ defmodule WardrikCore.AgentTest do
   import WardrikCore.Test.LLM
 
   alias WardrikCore.Test.Echo
+
+  # A tool that tells the test it is running, then waits to be released.
+  defmodule Blocking do
+    @behaviour WardrikCore.Capability
+
+    @impl true
+    def tools(_context) do
+      [
+        WardrikCore.Tool.new!(
+          name: "block",
+          description: "Blocks until released",
+          run: fn _args, %{step: {:tool_call, call}} ->
+            send(WardrikCore.AgentTest, {:tool_running, call.id, self()})
+            receive do: (:release -> {:ok, "released"})
+          end
+        )
+      ]
+    end
+  end
+
   alias WardrikCore.Test.ParkTools
 
   setup :set_mimic_global
@@ -65,6 +85,35 @@ defmodule WardrikCore.AgentTest do
 
     assert %{messages: messages} = agent_state(agent)
     assert [:user, :assistant] = Enum.map(messages, & &1.role)
+  end
+
+  test "an agent lost while its tools run recovers the batch without asking the model again" do
+    Process.register(self(), WardrikCore.AgentTest)
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("call-a", "block")])} end)
+    |> expect(:stream_text, fn _, messages, _ ->
+      assert %{role: :tool, tool_call_id: "call-a"} = List.last(messages)
+      {:ok, answer("done")}
+    end)
+
+    {id, agent} = start_agent(capabilities: [Blocking])
+    WardrikCore.ask(agent, "hi")
+    assert_receive {:tool_running, "call-a", _tool}
+
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, _pid, :killed}
+
+    {^id, agent} = start_agent(agent_id: id, capabilities: [Blocking])
+    assert_receive {:tool_running, "call-a", tool}
+    send(tool, :release)
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+
+    assert %{state: :idle, checkpoint: nil, in_flight: [], messages: messages} =
+             agent_state(agent)
+
+    assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
   end
 
   test "an unknown cast is ignored" do

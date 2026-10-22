@@ -27,10 +27,9 @@ defmodule WardrikCore.Agent do
     {:ok, state}
   end
 
-  # A resumed turn runs under the agent's config as it is now, on the messages it parked with.
   @impl true
   def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
-    context = %{state.context | model: state.model, messages: parked.messages}
+    context = turn_context(state, parked.messages)
     {:reply, :ok, start_turn(state, fn -> Turn.resume(context, parked.reason, input) end)}
   end
 
@@ -40,6 +39,11 @@ defmodule WardrikCore.Agent do
     do: {:reply, parked.reason, state}
 
   def handle_call(:parked, _from, state), do: {:reply, nil, state}
+
+  def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state),
+    do: {:reply, :ok, %{state | checkpoint: checkpoint, parked: nil}, sync: true}
+
+  def handle_call({:checkpoint, _checkpoint}, _from, state), do: {:reply, :stale, state}
 
   @impl true
   def handle_cast({:ask, text}, %State{} = state) when is_binary(text) do
@@ -54,14 +58,13 @@ defmodule WardrikCore.Agent do
   end
 
   @impl true
-  def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
-    context = %{
-      state.context
-      | model: state.model,
-        messages: state.messages ++ state.pending_messages,
-        response: nil
-    }
+  def handle_continue(:maybe_run, %State{state: :due, checkpoint: checkpoint} = state) do
+    context = turn_context(state, checkpoint.messages)
+    {:noreply, start_turn(state, fn -> Turn.recover(context, checkpoint) end)}
+  end
 
+  def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
+    context = turn_context(state, state.messages ++ state.pending_messages)
     state = %{state | in_flight: state.pending_messages, pending_messages: []}
     {:noreply, start_turn(state, fn -> Turn.run(context) end)}
   end
@@ -94,6 +97,19 @@ defmodule WardrikCore.Agent do
   def terminate(_reason, %State{task: %Task{} = task}), do: Task.shutdown(task, :brutal_kill)
   def terminate(_reason, _state), do: :ok
 
+  defp turn_context(state, messages) do
+    agent = self()
+
+    %{
+      state.context
+      | model: state.model,
+        messages: messages,
+        checkpoint: fn checkpoint ->
+          GenServer.call(agent, {:checkpoint, checkpoint}, :timer.seconds(30))
+        end
+    }
+  end
+
   defp start_turn(state, fun) do
     :telemetry.execute([:wardrik_core, :turn, :start], %{system_time: System.system_time()}, %{
       agent_id: state.agent_id
@@ -117,14 +133,21 @@ defmodule WardrikCore.Agent do
       | state: :idle,
         task: nil,
         parked: nil,
+        checkpoint: nil,
         in_flight: [],
         messages: context.messages
     }
 
-  # in_flight stays until the turn ends, so a resumed turn that fails keeps them.
   defp finished(state, {:park, reason, context}) do
     Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
-    %{state | state: :waiting, task: nil, parked: %{reason: reason, messages: context.messages}}
+
+    %{
+      state
+      | state: :waiting,
+        task: nil,
+        checkpoint: nil,
+        parked: %{reason: reason, messages: context.messages}
+    }
   end
 
   defp finished(state, {:error, reason}) do
@@ -132,13 +155,13 @@ defmodule WardrikCore.Agent do
     unanswered(state)
   end
 
-  # Kept in history rather than requeued, so a message that always fails can't loop.
   defp unanswered(state),
     do: %{
       state
       | state: :idle,
         task: nil,
         parked: nil,
+        checkpoint: nil,
         in_flight: [],
         messages: state.messages ++ state.in_flight
     }

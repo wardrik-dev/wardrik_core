@@ -93,6 +93,45 @@ defmodule WardrikCore.TurnTest do
     assert {:error, :rate_limited} = Turn.run(context)
   end
 
+  describe "checkpoints" do
+    test "a batch is checkpointed before its tools run", %{context: context} do
+      test = self()
+
+      checkpoint = fn checkpoint ->
+        send(test, {:checkpoint, checkpoint})
+        :ok
+      end
+
+      ReqLLM
+      |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo", %{text: "a"})])} end)
+      |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+      assert {:ok, _} = Turn.run(%{context | checkpoint: checkpoint})
+
+      assert_receive {:checkpoint, %{calls: [%{id: "1"}], rounds: 25, messages: messages}}
+      assert [:user, :assistant] = Enum.map(messages, & &1.role)
+    end
+
+    test "recover/2 runs the checkpointed calls without asking the model again",
+         %{context: context} do
+      assistant = calling([call("1", "echo", %{text: "a"})]).message
+
+      checkpoint = %{
+        messages: context.messages ++ [assistant],
+        calls: assistant.tool_calls,
+        rounds: 3
+      }
+
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert %{role: :tool, tool_call_id: "1"} = List.last(messages)
+        {:ok, answer("done")}
+      end)
+
+      assert {:ok, %Context{messages: messages}} = Turn.recover(context, checkpoint)
+      assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
+    end
+  end
+
   describe "resume/3" do
     setup %{context: context} do
       context = %{context | middleware: [ParkTools]}
