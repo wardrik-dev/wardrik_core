@@ -171,6 +171,57 @@ defmodule WardrikCore.AgentTest do
     assert %{state: :idle, messages: [%{role: :user}]} = agent_state(agent)
   end
 
+  test "a message sent during a turn steers it: the turn yields, and the next one answers it" do
+    Process.register(self(), WardrikCore.AgentTest)
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("call-a", "block")])} end)
+    |> expect(:stream_text, fn _, messages, _ ->
+      assert [:user, :assistant, :tool, :user] = Enum.map(messages, & &1.role)
+      {:ok, answer("done")}
+    end)
+
+    {id, agent} = start_agent(capabilities: [Blocking])
+    :ok = WardrikCore.ask(agent, "first")
+    assert_receive {:tool_running, "call-a", tool}
+
+    :ok = WardrikCore.ask(agent, "actually, second")
+    send(tool, :release)
+
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+
+    assert [:user, :assistant, :tool, :user, :assistant] =
+             agent |> WardrikCore.history() |> Enum.map(& &1.role)
+  end
+
+  test "status, history and stop" do
+    test = self()
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ ->
+      send(test, :generating)
+      receive do: (:never -> :ok)
+    end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent()
+    assert :idle = WardrikCore.status(agent)
+    assert [] = WardrikCore.history(agent)
+
+    :ok = WardrikCore.ask(agent, "hi")
+    assert_receive :generating
+    assert :running = WardrikCore.status(agent)
+
+    ref = Process.monitor(agent)
+    assert :ok = WardrikCore.stop(agent)
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}
+
+    {^id, agent} = start_agent(agent_id: id)
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert [:user, :assistant] = agent |> WardrikCore.history() |> Enum.map(& &1.role)
+  end
+
   test "an unknown cast is ignored" do
     {_id, agent} = start_agent()
 

@@ -39,6 +39,13 @@ defmodule WardrikCore.Turn do
     end)
   end
 
+  @doc "Asks the turn running in `pid` to end at its next step."
+  @spec yield(pid()) :: :ok
+  def yield(pid) do
+    send(pid, {__MODULE__, :yield})
+    :ok
+  end
+
   defp reenter(context, {:tool_calls, results}, input) do
     context = clear_resume(context)
     parked = parked_calls(results)
@@ -74,6 +81,10 @@ defmodule WardrikCore.Turn do
   defp loop(_context, 0), do: {:error, :max_rounds}
 
   defp loop(context, rounds) do
+    if yield_requested?(), do: {:ok, context}, else: step(context, rounds)
+  end
+
+  defp step(context, rounds) do
     with {:ok, context} <- Context.run(context, :generate, &generate/1) do
       context = clear_resume(context)
 
@@ -99,6 +110,14 @@ defmodule WardrikCore.Turn do
       context
       |> append_messages(ToolRunner.messages(results))
       |> loop(rounds - 1)
+    end
+  end
+
+  defp yield_requested? do
+    receive do
+      {__MODULE__, :yield} -> true
+    after
+      0 -> false
     end
   end
 

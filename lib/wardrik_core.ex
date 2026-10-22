@@ -27,7 +27,19 @@ defmodule WardrikCore do
     )
   end
 
-  def ask(agent, text), do: GenServer.cast(agent, {:ask, text})
+  @doc "Queues a message, returning once it is stored. A running turn yields to it."
+  @spec ask(GenServer.server(), String.t()) :: :ok
+  def ask(agent, text) when is_binary(text), do: GenServer.call(agent, {:ask, text})
+
+  @spec history(GenServer.server()) :: [ReqLLM.Message.t()]
+  def history(agent), do: GenServer.call(agent, :history)
+
+  @spec status(GenServer.server()) :: :idle | :running | :waiting | :due
+  def status(agent), do: GenServer.call(agent, :status)
+
+  @doc "Stops the agent until it is started again."
+  @spec stop(GenServer.server()) :: :ok
+  def stop(agent), do: GenServer.call(agent, :stop)
 
   @doc "Stops the running or parked turn."
   @spec interrupt(GenServer.server()) :: :ok | {:error, :idle}

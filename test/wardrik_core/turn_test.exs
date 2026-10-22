@@ -87,6 +87,12 @@ defmodule WardrikCore.TurnTest do
     assert_receive {:step, :generate}
   end
 
+  test "a turn asked to yield ends before asking the model", %{context: context} do
+    Turn.yield(self())
+
+    assert {:ok, %Context{response: nil, messages: [%{role: :user}]}} = Turn.run(context)
+  end
+
   test "a model error fails the turn", %{context: context} do
     expect(ReqLLM, :stream_text, fn _, _, _ -> {:error, :rate_limited} end)
 

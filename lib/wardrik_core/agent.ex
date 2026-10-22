@@ -28,6 +28,16 @@ defmodule WardrikCore.Agent do
   end
 
   @impl true
+  def handle_call({:ask, text}, _from, %State{} = state) do
+    if state.state == :running, do: Turn.yield(state.task.pid)
+    state = %{state | pending_messages: state.pending_messages ++ [ReqLLM.Context.user(text)]}
+    {:reply, :ok, state, {:continue, :maybe_run}, sync: true}
+  end
+
+  def handle_call(:history, _from, state), do: {:reply, state.messages, state}
+  def handle_call(:status, _from, state), do: {:reply, state.state, state}
+  def handle_call(:stop, _from, state), do: {:stop, :permanent, :ok, state}
+
   def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
     context = turn_context(state, parked.messages)
     {:reply, :ok, start_turn(state, fn -> Turn.resume(context, parked.reason, input) end)}
@@ -54,12 +64,6 @@ defmodule WardrikCore.Agent do
   def handle_call(:interrupt, _from, state), do: {:reply, {:error, :idle}, state}
 
   @impl true
-  def handle_cast({:ask, text}, %State{} = state) when is_binary(text) do
-    message = ReqLLM.Context.user(text)
-    state = %{state | pending_messages: state.pending_messages ++ [message]}
-    {:noreply, state, {:continue, :maybe_run}, sync: true}
-  end
-
   def handle_cast(request, state) do
     Logger.warning("Agent #{state.agent_id} ignored an unknown cast: #{inspect(request)}")
     {:noreply, state}
