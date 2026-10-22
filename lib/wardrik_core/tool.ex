@@ -41,8 +41,14 @@ defmodule WardrikCore.Tool do
 
     with %__MODULE__{} = tool <-
            Enum.find(tools, {:error, "Unknown tool: #{name}"}, &(&1.name == name)),
-         {:ok, args} <- ReqLLM.Tool.validate_input(tool.req_llm, ToolCall.args_map(call)) do
+         {:ok, args} <- validate(tool, ToolCall.args_map(call)) do
       tool.run.(args, context)
     end
   end
+
+  defp validate(%__MODULE__{schema: schema}, args) when is_map(schema),
+    do: ReqLLM.Schema.validate(args, schema)
+
+  defp validate(%__MODULE__{req_llm: req_llm}, args),
+    do: ReqLLM.Tool.validate_input(req_llm, args)
 end

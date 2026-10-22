@@ -67,6 +67,27 @@ defmodule WardrikCore.ToolRunnerTest do
            ] = ToolRunner.run(context, calls, timeout: 100)
   end
 
+  test "a JSON Schema tool's arguments are validated", %{context: context} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"url" => %{"type" => "string"}},
+      "required" => ["url"]
+    }
+
+    fetch =
+      WardrikCore.Tool.new!(
+        name: "fetch",
+        description: "fetch",
+        schema: schema,
+        run: fn %{"url" => url}, _context -> {:ok, url} end
+      )
+
+    context = %{context | tools: [fetch]}
+
+    assert [{_, {:ok, "https://x"}}, {_, {:error, _}}] =
+             ToolRunner.run(context, [call("1", "fetch", %{url: "https://x"}), call("2", "fetch")])
+  end
+
   test "a tool is handed its call", %{context: context} do
     assert [{_, {:ok, "7"}}] = ToolRunner.run(context, [call("7", "whoami")])
   end

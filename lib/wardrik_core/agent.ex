@@ -45,6 +45,12 @@ defmodule WardrikCore.Agent do
     {:reply, :ok, state, {:continue, :maybe_run}, sync: true}
   end
 
+  def handle_call({:configure, opts}, _from, state) do
+    {model, settings} = Keyword.pop(opts, :model, state.model)
+    state = %{state | model: model, context: struct!(state.context, settings)}
+    {:reply, :ok, state, sync: true}
+  end
+
   def handle_call(:history, _from, state), do: {:reply, state.messages, state}
   def handle_call(:status, _from, state), do: {:reply, state.state, state}
   def handle_call(:stop, _from, state), do: {:stop, :permanent, :ok, state}

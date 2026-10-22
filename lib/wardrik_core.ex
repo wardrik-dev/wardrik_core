@@ -37,19 +37,14 @@ defmodule WardrikCore do
     |> Map.put(:id, name)
   end
 
+  @config [:capabilities, :middleware, :timeout, :max_rounds, :metadata]
+
   @doc "Starts the agent `:agent_id`, or loads it as it was saved."
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_agent(instance \\ __MODULE__, opts) do
+    opts = Keyword.validate!(opts, [:agent_id, :model | @config])
     agent_id = Keyword.fetch!(opts, :agent_id)
-
-    context =
-      Context.new(
-        agent_id: agent_id,
-        capabilities: Keyword.get(opts, :capabilities, []),
-        middleware: Keyword.get(opts, :middleware, []),
-        timeout: Keyword.get(opts, :timeout, :infinity)
-      )
-
+    context = Context.new([agent_id: agent_id] ++ Keyword.take(opts, @config))
     state = State.new(agent_id: agent_id, model: Keyword.fetch!(opts, :model), context: context)
     child = {WardrikCore.Agent, key: agent_id, initial_state: state}
 
@@ -57,6 +52,26 @@ defmodule WardrikCore do
       {:ok, {pid, _meta}} -> {:ok, pid}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc "Replaces the agent's model or settings, from its next turn."
+  @spec configure(GenServer.server(), keyword()) :: :ok
+  def configure(agent, opts) do
+    opts =
+      opts
+      |> Keyword.validate!([:model | @config])
+      |> Keyword.replace_lazy(:model, &State.canonical_spec!/1)
+
+    GenServer.call(agent, {:configure, opts})
+  end
+
+  @doc "The ids of every saved agent."
+  @spec list(atom()) :: [String.t()]
+  def list(instance \\ __MODULE__) do
+    instance
+    |> agents()
+    |> DurableServer.Supervisor.stream_all_server_info()
+    |> Enum.map(fn info -> info.key end)
   end
 
   @doc "The running agent `agent_id`, or `nil`."

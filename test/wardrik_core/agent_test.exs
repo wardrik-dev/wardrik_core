@@ -304,6 +304,45 @@ defmodule WardrikCore.AgentTest do
     assert nil == WardrikCore.whereis("no-such-agent")
   end
 
+  test "start_agent/1 metadata reaches middleware" do
+    Process.register(self(), WardrikCore.AgentTest)
+    expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {_id, agent} = start_agent(middleware: [Trace], metadata: %{trace: 42})
+    :ok = WardrikCore.ask(agent, "hi")
+
+    assert_receive {:trace, 42}
+  end
+
+  test "start_agent/1 rejects options it doesn't know" do
+    assert_raise ArgumentError, fn -> start_agent(not_an_option: true) end
+  end
+
+  test "configure/2 changes the model for the next turn" do
+    expect(ReqLLM, :stream_text, fn "moonshotai:kimi-k3", _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent()
+    assert :ok = WardrikCore.configure(agent, model: "moonshotai:kimi-k3", max_rounds: 3)
+
+    :ok = WardrikCore.ask(agent, "hi")
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+    assert %{model: "moonshotai:kimi-k3", context: %{max_rounds: 3}} = agent_state(agent)
+  end
+
+  test "configure/2 rejects a bad model or option in the caller" do
+    {_id, agent} = start_agent()
+
+    assert_raise ArgumentError, fn -> WardrikCore.configure(agent, model: "nope:nope") end
+    assert_raise ArgumentError, fn -> WardrikCore.configure(agent, not_an_option: true) end
+    assert :idle = WardrikCore.status(agent)
+  end
+
+  test "list/1 includes every saved agent" do
+    {id, _agent} = start_agent()
+
+    assert id in WardrikCore.list()
+  end
+
   test "an unknown cast is ignored" do
     {_id, agent} = start_agent()
 

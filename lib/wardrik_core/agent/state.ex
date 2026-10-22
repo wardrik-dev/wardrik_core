@@ -81,7 +81,8 @@ defmodule WardrikCore.Agent.State do
   defp load_context(dumped, agent_id),
     do: struct(WardrikCore.Context, Map.put(dumped, :agent_id, agent_id))
 
-  defp canonical_spec!(spec) do
+  @doc false
+  def canonical_spec!(spec) do
     case ReqLLM.model(spec) do
       {:ok, model} -> LLMDB.Model.spec(model)
       {:error, reason} -> raise ArgumentError, "Invalid model: #{inspect(reason)}"
