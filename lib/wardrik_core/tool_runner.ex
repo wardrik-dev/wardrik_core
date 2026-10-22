@@ -1,9 +1,9 @@
 defmodule WardrikCore.ToolRunner do
   @moduledoc false
-  alias ReqLLM.ToolCall
   alias WardrikCore.Context
   alias WardrikCore.Telemetry
   alias WardrikCore.Tool
+  alias WardrikCore.ToolCall
 
   @timeout :timer.minutes(3)
   @max_concurrency 8
@@ -35,7 +35,7 @@ defmodule WardrikCore.ToolRunner do
   @spec messages([{ToolCall.t(), outcome()}]) :: [ReqLLM.Message.t()]
   def messages(results) do
     for {call, {tag, output}} <- results, tag in [:ok, :error] do
-      ReqLLM.Context.tool_result(call.id, ToolCall.name(call), answer(tag, output))
+      ReqLLM.Context.tool_result(call.id, call.name, answer(tag, output))
     end
   end
 
@@ -59,11 +59,11 @@ defmodule WardrikCore.ToolRunner do
     do: {:ok, %{context | response: Tool.call(tools, call, context)}}
 
   defp timeout(tools, calls) do
-    names = MapSet.new(calls, &ToolCall.name/1)
+    names = MapSet.new(calls, & &1.name)
 
     tools
     |> Enum.filter(&(&1.name in names))
-    |> Enum.map(&Map.get(&1.meta, :timeout, @timeout))
+    |> Enum.map(fn tool -> tool.timeout || @timeout end)
     |> Enum.max(fn -> @timeout end)
   end
 

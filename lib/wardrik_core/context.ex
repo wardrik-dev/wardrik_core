@@ -4,7 +4,7 @@ defmodule WardrikCore.Context do
   """
   alias WardrikCore.Turn
 
-  @type step :: :turn | :generate | {:tool_call, ReqLLM.ToolCall.t()}
+  @type step :: :turn | :generate | {:tool_call, WardrikCore.ToolCall.t()}
   @type entry :: module() | {module(), term()}
 
   @type t() :: %__MODULE__{
@@ -56,6 +56,11 @@ defmodule WardrikCore.Context do
     end)
     |> then(& &1.(context))
   end
+
+  @doc "The tool `call` names, or `nil`."
+  @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil
+  def tool(%__MODULE__{tools: tools}, %WardrikCore.ToolCall{name: name}),
+    do: Enum.find(tools, &(&1.name == name))
 
   @doc "A capability or middleware entry as `{module, opts}`."
   @spec entry(entry()) :: {module(), term()}

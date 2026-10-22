@@ -5,7 +5,7 @@ defmodule WardrikCore.Turn do
 
   @type checkpoint :: %{
           messages: [ReqLLM.Message.t()],
-          calls: [ReqLLM.ToolCall.t()],
+          calls: [WardrikCore.ToolCall.t()],
           rounds: non_neg_integer(),
           metadata: map()
         }
@@ -96,11 +96,17 @@ defmodule WardrikCore.Turn do
     with {:ok, context} <- Context.run(context, :generate, &generate/1) do
       context = clear_resume(context)
 
-      case ReqLLM.Response.tool_calls(context.response) do
+      case tool_calls(context.response) do
         [] -> {:ok, context}
         calls -> run_tools(context, calls, rounds)
       end
     end
+  end
+
+  defp tool_calls(response) do
+    response
+    |> ReqLLM.Response.tool_calls()
+    |> Enum.map(&WardrikCore.ToolCall.from_req_llm/1)
   end
 
   defp run_tools(context, calls, rounds) do

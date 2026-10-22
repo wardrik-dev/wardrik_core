@@ -179,7 +179,7 @@ defmodule WardrikCore.TurnTest do
 
       checkpoint = %{
         messages: context.messages ++ [assistant],
-        calls: assistant.tool_calls,
+        calls: Enum.map(assistant.tool_calls, &WardrikCore.ToolCall.from_req_llm/1),
         rounds: 3,
         metadata: %{trace: "t1"}
       }

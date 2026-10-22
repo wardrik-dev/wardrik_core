@@ -2,8 +2,8 @@ defmodule WardrikCore.Tool do
   @moduledoc """
   A tool an agent may call.
   """
-  alias ReqLLM.ToolCall
   alias WardrikCore.Context
+  alias WardrikCore.ToolCall
 
   @type answer :: {:ok, term()} | {:error, term()} | {:park, term()}
 
@@ -12,12 +12,13 @@ defmodule WardrikCore.Tool do
           description: String.t(),
           schema: keyword() | map(),
           run: (map(), Context.t() -> answer()),
-          meta: map(),
+          timeout: timeout() | nil,
+          private: map(),
           req_llm: ReqLLM.Tool.t()
         }
 
   @enforce_keys [:name, :description, :run, :req_llm]
-  defstruct [:name, :description, :run, :req_llm, schema: [], meta: %{}]
+  defstruct [:name, :description, :run, :req_llm, :timeout, schema: [], private: %{}]
 
   @spec new!(keyword()) :: t()
   def new!(opts) do
@@ -34,14 +35,27 @@ defmodule WardrikCore.Tool do
     %{tool | req_llm: req_llm}
   end
 
+  @doc "Stores `value` under `key` in the tool's private data, kept for the package that owns `key`."
+  @spec put_private(t(), term(), term()) :: t()
+  def put_private(%__MODULE__{} = tool, key, value),
+    do: %{tool | private: Map.put(tool.private, key, value)}
+
+  @doc "The value under `key` in the tool's private data, or `default`."
+  @spec get_private(t(), term(), term()) :: term()
+  def get_private(%__MODULE__{} = tool, key, default \\ nil),
+    do: Map.get(tool.private, key, default)
+
+  @doc "Updates the value under `key` in the tool's private data with `fun`, or sets `default`."
+  @spec update_private(t(), term(), term(), (term() -> term())) :: t()
+  def update_private(%__MODULE__{} = tool, key, default, fun),
+    do: %{tool | private: Map.update(tool.private, key, default, fun)}
+
   @doc "Runs the tool `call` names, from `tools`, with its validated arguments."
   @spec call([t()], ToolCall.t(), Context.t()) :: answer()
   def call(tools, %ToolCall{} = call, %Context{} = context) do
-    name = ToolCall.name(call)
-
     with %__MODULE__{} = tool <-
-           Enum.find(tools, {:error, "Unknown tool: #{name}"}, &(&1.name == name)),
-         {:ok, args} <- validate(tool, ToolCall.args_map(call)) do
+           Enum.find(tools, {:error, "Unknown tool: #{call.name}"}, &(&1.name == call.name)),
+         {:ok, args} <- validate(tool, call.arguments) do
       tool.run.(args, context)
     end
   end

@@ -66,4 +66,12 @@ defmodule WardrikCore.ContextTest do
                {:ok, %{context | on_chunk: [handler | context.on_chunk]}}
              end)
   end
+
+  test "tool/2 finds the tool a call names" do
+    tool = WardrikCore.Tool.new!(name: "echo", description: "echo", run: fn _, _ -> {:ok, ""} end)
+    context = Context.new(tools: [tool])
+
+    assert ^tool = Context.tool(context, %WardrikCore.ToolCall{id: "1", name: "echo"})
+    assert nil == Context.tool(context, %WardrikCore.ToolCall{id: "2", name: "nope"})
+  end
 end

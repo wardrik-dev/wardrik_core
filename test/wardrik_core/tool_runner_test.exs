@@ -2,8 +2,8 @@ defmodule WardrikCore.ToolRunnerTest do
   use ExUnit.Case, async: true
   @moduletag :capture_log
 
-  alias ReqLLM.ToolCall
   alias WardrikCore.Context
+  alias WardrikCore.ToolCall
   alias WardrikCore.ToolRunner
 
   defmodule Deny do
@@ -11,7 +11,7 @@ defmodule WardrikCore.ToolRunnerTest do
 
     @impl true
     def call(%Context{step: {:tool_call, call}} = context, next, _opts) do
-      if ToolCall.name(call) == "echo", do: {:error, "not allowed"}, else: next.(context)
+      if call.name == "echo", do: {:error, "not allowed"}, else: next.(context)
     end
   end
 
@@ -158,15 +158,20 @@ defmodule WardrikCore.ToolRunnerTest do
              ToolRunner.messages(results)
   end
 
-  defp tool(name, run, meta \\ %{}) do
+  defp tool(name, run, opts \\ []) do
     WardrikCore.Tool.new!(
       name: name,
       description: name,
       schema: [text: [type: :string]],
       run: run,
-      meta: Map.new(meta)
+      timeout: opts[:timeout]
     )
   end
 
-  defp call(id, name, args \\ %{}), do: ToolCall.new(id, name, JSON.encode!(args))
+  defp call(id, name, args \\ %{}),
+    do: %ToolCall{
+      id: id,
+      name: name,
+      arguments: Map.new(args, fn {k, v} -> {to_string(k), v} end)
+    }
 end
