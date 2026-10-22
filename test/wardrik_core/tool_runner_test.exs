@@ -173,6 +173,23 @@ defmodule WardrikCore.ToolRunnerTest do
     assert_in_delta measured.usd, 0.03, 1.0e-9
   end
 
+  defmodule HandSecret do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(context, next, _opts),
+      do: context |> Context.put_private(:secret, "s3cret") |> next.()
+  end
+
+  test "private data set during a tool call stays with that call", %{context: context} do
+    context = %{context | middleware: [HandSecret]}
+
+    assert {[{_call, {:ok, "a"}}], after_calls} =
+             ToolRunner.run(context, [call("1", "echo", %{text: "a"})])
+
+    assert nil == Context.get_private(after_calls, :secret)
+  end
+
   defp run(context, calls, opts \\ []) do
     {results, _context} = ToolRunner.run(context, calls, opts)
     results

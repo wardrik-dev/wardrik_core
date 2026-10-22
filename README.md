@@ -15,7 +15,7 @@ end
 
 ## Start an agent
 
-Let's run agents under our app, with their state kept in EKV:
+Let's run agents in your app, with their state kept in EKV:
 
 ```elixir
 children = [
@@ -71,6 +71,69 @@ agent never mixes two people's authority. Every step's span says who it was for,
 
 Core keeps principals and passes them on, but never reads their `attributes`. They're for the
 packages that decide by them, like a vault that keys secrets by `id`.
+
+## Use their credentials
+
+A tool that acts as a person needs their token. A `WardrikCore.Credentials` module finds it, by the
+credential's name and the principal the turn acts for. Here's one that keeps tokens in your app's
+own table, and sends a person to sign in when there's none yet:
+
+```elixir
+defmodule MyApp.Vault do
+  @behaviour WardrikCore.Credentials
+
+  @impl true
+  def resolve(_name, nil, _opts), do: {:error, "There's no one to act for."}
+
+  def resolve(name, %WardrikCore.Principal{id: id}, opts) do
+    case MyApp.Tokens.get(id, name) do
+      %{access_token: token} -> {:ok, token}
+      nil -> {:authorize, "#{opts[:base_url]}/connect/#{name}"}
+    end
+  end
+end
+```
+
+It answers one of three ways:
+
+- `{:ok, token}`, when it has the token.
+- `{:authorize, url}`, when the person must sign in first. The URL is a page in your app, which
+  starts the provider's OAuth flow for whoever is signed in.
+- `{:error, reason}`, when it can't help.
+
+Give it to the agent, and a tool fetches what it needs:
+
+```elixir
+WardrikCore.start_agent(
+  agent_id: "support",
+  model: "anthropic:claude-haiku-4-5",
+  credentials: {MyApp.Vault, base_url: "https://app.example.com"}
+)
+
+run: fn %{title: title}, context ->
+  with {:ok, token} <- WardrikCore.Credentials.fetch(context, "github") do
+    GitHub.create_issue(token, title)
+  end
+end
+```
+
+When the vault answers `{:authorize, url}`, the call parks on a `WardrikCore.Authorization`. It
+carries the `url`, the `credential` and the `principal`, so you can show the right person where to
+sign in:
+
+```elixir
+{:tool_calls, [{_call, {:park, %WardrikCore.Authorization{url: url}}}]} =
+  WardrikCore.parked(agent)
+```
+
+Your app's OAuth callback stores the token in `MyApp.Tokens`, then resumes the turn. The call runs again,
+and this time the vault has the token:
+
+```elixir
+WardrikCore.resume(agent, %{}, %{by: maria})
+```
+
+A credential is a value. It's never kept in the context, so it's never saved or emitted.
 
 ## Give it tools
 

@@ -12,6 +12,8 @@
   otherwise.
 - Principals, as in IAM. An agent has its own, a message can come from another, and the turn that
   answers acts on their behalf. Each step's span says who it was for, as `enduser.id`.
+- `WardrikCore.Credentials`, which gives a tool the credentials of whoever its turn acts for. One
+  the person hasn't granted yet parks the call on a `WardrikCore.Authorization`.
 - A tool reports on its step, like what it cost, by answering with its context.
 - Every turn is a trace and every step a span, with attributes and measurements, reported as
   telemetry events.

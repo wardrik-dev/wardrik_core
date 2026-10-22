@@ -34,6 +34,7 @@ defmodule WardrikCore.Agent.State do
     :max_rounds,
     :timeout,
     :principal,
+    :credentials,
     :metadata,
     :private,
     :messages

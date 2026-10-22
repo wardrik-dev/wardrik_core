@@ -1,17 +1,6 @@
 defmodule WardrikCore.Context do
   @moduledoc """
-  The token threaded through a turn's middleware, like a `Req.Request`.
-
-  Its private data stays with the agent from turn to turn, and through restarts. It's saved when a
-  turn finishes or parks, and at each checkpoint. A turn that fails or crashes keeps only what its
-  last checkpoint saved.
-
-  `principal` is the agent's own; see `WardrikCore.Principal`. `acting_for/1` gives who the turn
-  acts for.
-
-  Each step is a span of the turn's trace, as OpenTelemetry has them. Give a step attributes with
-  `attribute/3`, and count what it used with `measure/3`. Both are reported when the step ends; see
-  `WardrikCore.Telemetry`. A step that returns `{:error, reason}` reports neither.
+  The token threaded through a turn's middleware.
   """
   use WardrikCore.Private
 
@@ -25,6 +14,7 @@ defmodule WardrikCore.Context do
           messages: [ReqLLM.Message.t()],
           response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
           capabilities: [entry()],
+          credentials: entry() | nil,
           tools: [WardrikCore.Tool.t()],
           middleware: [entry()],
           max_rounds: pos_integer(),
@@ -49,6 +39,7 @@ defmodule WardrikCore.Context do
     :resume,
     :checkpoint,
     :principal,
+    :credentials,
     messages: [],
     capabilities: [],
     tools: [],
