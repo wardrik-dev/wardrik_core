@@ -88,14 +88,16 @@ defmodule WardrikCore.TurnTest do
     response = %{answer("hello") | usage: %{input_tokens: 10, output_tokens: 4, total_cost: 0.01}}
     expect(ReqLLM, :stream_text, fn _model, _messages, _opts -> {:ok, response} end)
 
-    assert {:ok,
-            %Context{usage: %WardrikCore.Usage{input_tokens: 10, output_tokens: 4, usd: 0.01}}} =
+    assert {:ok, %Context{measurements: %{input_tokens: 10, output_tokens: 4, usd: 0.01}}} =
              Turn.run(context)
 
     expect(ReqLLM, :stream_text, fn _model, _messages, _opts -> {:ok, response} end)
 
-    assert {:ok, %Context{usage: %WardrikCore.Usage{input_tokens: 10, usd: nil}}} =
+    assert {:ok, %Context{measurements: measurements}} =
              Turn.run(%{context | model: "zai_coding_plan:glm-5.3-flash"})
+
+    assert %{input_tokens: 10, unpriced_calls: 1} = measurements
+    refute Map.has_key?(measurements, :usd)
   end
 
   test "offers the capabilities' tools to the model", %{context: context} do
@@ -213,7 +215,9 @@ defmodule WardrikCore.TurnTest do
         calls: Enum.map(assistant.tool_calls, &WardrikCore.ToolCall.from_req_llm/1),
         rounds: 3,
         metadata: %{trace: "t1"},
-        private: %{}
+        private: %{},
+        span: WardrikCore.Span.root(),
+        measurements: %{}
       }
 
       expect(ReqLLM, :stream_text, fn _, messages, _ ->

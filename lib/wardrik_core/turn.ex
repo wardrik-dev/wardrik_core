@@ -3,13 +3,16 @@ defmodule WardrikCore.Turn do
   alias WardrikCore.Context
   alias WardrikCore.Resume
   alias WardrikCore.ToolRunner
+  alias WardrikCore.Usage
 
   @type checkpoint :: %{
           messages: [ReqLLM.Message.t()],
           calls: [WardrikCore.ToolCall.t()],
           rounds: non_neg_integer(),
           metadata: map(),
-          private: map()
+          private: map(),
+          span: WardrikCore.Span.t(),
+          measurements: map()
         }
 
   @spec run(Context.t()) :: WardrikCore.Middleware.result()
@@ -42,12 +45,12 @@ defmodule WardrikCore.Turn do
       with_tools(context)
       | messages: messages,
         metadata: metadata,
-        private: checkpoint.private
+        private: checkpoint.private,
+        span: checkpoint.span,
+        measurements: checkpoint.measurements
     }
 
-    Context.run(context, :turn, fn context ->
-      continue(context, ToolRunner.run(context, calls), rounds)
-    end)
+    Context.run(context, :turn, fn context -> run_calls(context, calls, rounds) end)
   end
 
   @doc "Asks the turn running in `pid` to end at its next step."
@@ -61,7 +64,7 @@ defmodule WardrikCore.Turn do
     context = clear_resume(context)
     parked = parked_calls(results)
     calls = Enum.map(parked, fn {call, _reason} -> call end)
-    rerun = ToolRunner.run(context, calls, resume: resume_each(parked, resume))
+    {rerun, context} = ToolRunner.run(context, calls, resume: resume_each(parked, resume))
 
     continue(context, replace_outcomes(results, rerun), context.max_rounds)
   end
@@ -123,11 +126,18 @@ defmodule WardrikCore.Turn do
       calls: calls,
       rounds: rounds,
       metadata: context.metadata,
-      private: context.private
+      private: context.private,
+      span: context.span,
+      measurements: context.measurements
     }
 
     :ok = save_checkpoint(context, checkpoint)
-    continue(context, ToolRunner.run(context, calls), rounds)
+    run_calls(context, calls, rounds)
+  end
+
+  defp run_calls(context, calls, rounds) do
+    {results, context} = ToolRunner.run(context, calls)
+    continue(context, results, rounds)
   end
 
   defp save_checkpoint(%Context{checkpoint: nil}, _checkpoint), do: :ok
@@ -169,11 +179,11 @@ defmodule WardrikCore.Turn do
     with {:ok, streamed} <- ReqLLM.stream_text(context.model, context.messages, tools: tools),
          {:ok, response} <-
            ReqLLM.StreamResponse.process_stream(streamed, on_chunk: &dispatch(context, &1)) do
-      context = %{
-        context
-        | response: response,
-          usage: WardrikCore.Usage.from_req_llm(response, context.model)
-      }
+      context =
+        Context.measure(
+          %{context | response: response},
+          Usage.measurements(response, context.model)
+        )
 
       {:ok, append_messages(context, [response.message])}
     end

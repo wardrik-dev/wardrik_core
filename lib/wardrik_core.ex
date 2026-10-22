@@ -120,19 +120,20 @@ defmodule WardrikCore do
   @doc """
   Asks an evaluation model named `questions` about `state`, from inside a turn.
 
-  Returns each question's answer under its name, as the model gives it, and what the call used.
+  Returns each question's answer under its name, as the model gives it, and the call's
+  measurements, to pass to `WardrikCore.Context.measure/3`.
 
       questions = %{"urgent" => %{type: :boolean, instructions: "Is this urgent?"}}
-      {:ok, %{"urgent" => %{"probability" => p}}, usage} =
+      {:ok, %{"urgent" => %{"probability" => p}}, measurements} =
         WardrikCore.evaluate(context, "typesafe:jev-latest", "The site is down.", questions)
 
   Reach for this when middleware needs a model's judgement on a call.
   """
   @spec evaluate(Context.t(), String.t(), String.t() | map(), map()) ::
-          {:ok, map(), WardrikCore.Usage.t()} | {:error, term()}
+          {:ok, map(), %{atom() => number()}} | {:error, term()}
   def evaluate(%Context{}, model, state, questions) do
     with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
-      {:ok, response.object, WardrikCore.Usage.from_req_llm(response, model)}
+      {:ok, response.object, WardrikCore.Usage.measurements(response, model)}
     end
   end
 

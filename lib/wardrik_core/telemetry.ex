@@ -5,14 +5,69 @@ defmodule WardrikCore.Telemetry do
     * `[:wardrik_core, :agent, :start]` - `state`
     * `[:wardrik_core, :agent, :stop]` - `reason`
     * `[:wardrik_core, :message, :queued]` - `message`; measures `queued`
-    * `[:wardrik_core, :turn, :start]` - `kind`, and the `metadata` given to `resume/3`
-    * `[:wardrik_core, :turn, :stop]` - `kind`, `outcome`; measures `duration`
+    * `[:wardrik_core, :turn, :start]` - `kind`, `span`, and the `metadata` given to `resume/3`
+    * `[:wardrik_core, :turn, :stop]` - `kind`, `span`, `outcome`; measures `duration`
     * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
     * `[:wardrik_core, :turn, :dropped]`
     * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`
+    * `[:wardrik_core, :step, :start]` - `step`, `span`
+    * `[:wardrik_core, :step, :stop]` - `step`, `span`, `status`, `attributes`, and the `response`
+      or `reason`; measures `duration` and what the step measured
+    * `[:wardrik_core, :step, :exception]` - `step`, `span`, `kind`, `reason`, `stacktrace`
+
+  A turn's `span` is the root of its trace, and it keeps it through a park or a restart. Each step
+  runs in a child of it; see `WardrikCore.Span`.
   """
+
+  alias WardrikCore.Context
+  alias WardrikCore.Span
 
   @spec emit([atom()], map(), map()) :: :ok
   def emit(event, measurements \\ %{}, metadata),
     do: :telemetry.execute([:wardrik_core | event], measurements, metadata)
+
+  @doc false
+  @spec span(Context.t(), Context.step(), WardrikCore.Middleware.next()) ::
+          WardrikCore.Middleware.result()
+  def span(%Context{} = context, step, fun) do
+    inner = %{context | step: step, span: child(context, step), attributes: %{}}
+    start = %{agent_id: inner.agent_id, span: inner.span, step: step}
+
+    :telemetry.span([:wardrik_core, :step], start, fn ->
+      result = fun.(inner)
+      {result, measured(result, context), Map.merge(start, ended(result))}
+    end)
+  end
+
+  defp child(%Context{span: nil}, _step), do: Span.root()
+
+  defp child(context, {:tool_call, call}) do
+    replies = Enum.count(context.messages, &(&1.role == :assistant))
+    Span.child(context.span, key: "#{replies}/#{call.id}")
+  end
+
+  defp child(context, _step), do: Span.child(context.span)
+
+  defp ended({:ok, context}),
+    do: %{status: :ok, response: context.response, attributes: context.attributes}
+
+  defp ended({:park, reason, context}),
+    do: %{
+      status: :park,
+      reason: reason,
+      response: context.response,
+      attributes: context.attributes
+    }
+
+  defp ended({:error, reason}), do: %{status: :error, reason: reason, attributes: %{}}
+
+  defp measured({:ok, after_step}, before), do: gained(after_step, before)
+  defp measured({:park, _reason, after_step}, before), do: gained(after_step, before)
+  defp measured({:error, _reason}, _before), do: %{}
+
+  defp gained(%Context{measurements: now}, %Context{measurements: before}) do
+    now
+    |> Map.new(fn {key, amount} -> {key, amount - Map.get(before, key, 0)} end)
+    |> Map.reject(fn {_key, amount} -> amount == 0 end)
+  end
 end

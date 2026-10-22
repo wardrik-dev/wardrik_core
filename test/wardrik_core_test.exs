@@ -23,7 +23,7 @@ defmodule WardrikCoreTest do
       end)
 
       assert {:ok, %{"urgent" => %{"probability" => 0.9}},
-              %WardrikCore.Usage{input_tokens: 12, output_tokens: 1, usd: 0.001}} =
+              %{input_tokens: 12, output_tokens: 1, usd: 0.001}} =
                WardrikCore.evaluate(
                  WardrikCore.Context.new([]),
                  "anthropic:claude-haiku-4-5",

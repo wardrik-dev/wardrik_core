@@ -54,7 +54,7 @@ defmodule WardrikCore.ToolRunnerTest do
   test "answers each call in order", %{context: context} do
     calls = [call("1", "echo", %{text: "a"}), call("2", "echo", %{text: "b"})]
 
-    assert [{%{id: "1"}, {:ok, "a"}}, {%{id: "2"}, {:ok, "b"}}] = ToolRunner.run(context, calls)
+    assert [{%{id: "1"}, {:ok, "a"}}, {%{id: "2"}, {:ok, "b"}}] = run(context, calls)
   end
 
   test "a tool that exits or hangs is answered with an error", %{context: context} do
@@ -64,7 +64,7 @@ defmodule WardrikCore.ToolRunnerTest do
              {_, {:error, {:exit, :boom}}},
              {_, {:error, {:exit, :timeout}}},
              {_, {:ok, "ok"}}
-           ] = ToolRunner.run(context, calls, timeout: 100)
+           ] = run(context, calls, timeout: 100)
   end
 
   test "a JSON Schema tool's arguments are validated", %{context: context} do
@@ -85,11 +85,11 @@ defmodule WardrikCore.ToolRunnerTest do
     context = %{context | tools: [fetch]}
 
     assert [{_, {:ok, "https://x"}}, {_, {:error, _}}] =
-             ToolRunner.run(context, [call("1", "fetch", %{url: "https://x"}), call("2", "fetch")])
+             run(context, [call("1", "fetch", %{url: "https://x"}), call("2", "fetch")])
   end
 
   test "a tool is handed its call", %{context: context} do
-    assert [{_, {:ok, "7"}}] = ToolRunner.run(context, [call("7", "whoami")])
+    assert [{_, {:ok, "7"}}] = run(context, [call("7", "whoami")])
   end
 
   test "a call that times out emits a tool_call exit event", %{context: context} do
@@ -105,33 +105,33 @@ defmodule WardrikCore.ToolRunnerTest do
 
     on_exit(fn -> :telemetry.detach(agent_id) end)
 
-    ToolRunner.run(%{context | agent_id: agent_id}, [call("9", "slow")])
+    run(%{context | agent_id: agent_id}, [call("9", "slow")])
 
     assert_receive {:tool_exit, %{agent_id: ^agent_id, call: %{id: "9"}, reason: :timeout}}
   end
 
   test "a batch runs under its tools' declared timeout", %{context: context} do
-    assert [{_, {:error, {:exit, :timeout}}}] = ToolRunner.run(context, [call("1", "slow")])
+    assert [{_, {:error, {:exit, :timeout}}}] = run(context, [call("1", "slow")])
   end
 
   test "arguments that don't match the schema never reach the tool", %{context: context} do
-    assert [{_, {:error, _}}] = ToolRunner.run(context, [call("1", "echo", %{text: 1})])
+    assert [{_, {:error, _}}] = run(context, [call("1", "echo", %{text: 1})])
   end
 
   test "a tool that raises is answered with its message", %{context: context} do
-    results = ToolRunner.run(context, [call("1", "raise")])
+    results = run(context, [call("1", "raise")])
 
     assert [%{content: [%{text: text}]}] = ToolRunner.messages(results)
     assert text =~ "kaput"
   end
 
   test "an unknown tool is answered with an error", %{context: context} do
-    assert [{_, {:error, _}}] = ToolRunner.run(context, [call("1", "nope")])
+    assert [{_, {:error, _}}] = run(context, [call("1", "nope")])
   end
 
   test "middleware runs in each call's task, as a tool_call step", %{context: context} do
     call = call("1", "echo", %{text: "a"})
-    ToolRunner.run(%{context | middleware: [Report]}, [call])
+    run(%{context | middleware: [Report]}, [call])
 
     assert_receive {:step, {:tool_call, ^call}, pid}
     refute pid == self()
@@ -141,10 +141,10 @@ defmodule WardrikCore.ToolRunnerTest do
     calls = [call("1", "echo", %{text: "a"})]
 
     assert [{_, {:error, "not allowed"}}] =
-             ToolRunner.run(%{context | middleware: [Deny]}, calls)
+             run(%{context | middleware: [Deny]}, calls)
 
     assert [{_, {:park, :needs_approval}}] =
-             ToolRunner.run(%{context | middleware: [Park]}, calls)
+             run(%{context | middleware: [Park]}, calls)
   end
 
   test "messages/1 answers every call but parked ones" do
@@ -156,6 +156,11 @@ defmodule WardrikCore.ToolRunnerTest do
 
     assert [%{role: :tool, tool_call_id: "1"}, %{role: :tool, tool_call_id: "2"}] =
              ToolRunner.messages(results)
+  end
+
+  defp run(context, calls, opts \\ []) do
+    {results, _context} = ToolRunner.run(context, calls, opts)
+    results
   end
 
   defp tool(name, run, opts \\ []) do

@@ -11,10 +11,22 @@ defmodule WardrikCore.ToolRunner do
   @type outcome :: {:ok, term()} | {:error, term()} | {:park, term()}
 
   @doc """
-  Runs `calls` and answers each, in order.
+  Runs `calls` and answers each, in order. Adds what they measured to the context.
   """
-  @spec run(Context.t(), [ToolCall.t()], keyword()) :: [{ToolCall.t(), outcome()}]
+  @spec run(Context.t(), [ToolCall.t()], keyword()) :: {[{ToolCall.t(), outcome()}], Context.t()}
   def run(%Context{} = context, calls, opts \\ []) do
+    ran = run_each(%{context | measurements: %{}}, calls, opts)
+    results = Enum.map(ran, fn {call, outcome, _measured} -> {call, outcome} end)
+
+    measured =
+      Enum.reduce(ran, context, fn {_call, _outcome, measured}, context ->
+        Context.measure(context, measured)
+      end)
+
+    {results, measured}
+  end
+
+  defp run_each(context, calls, opts) do
     resume = Keyword.get(opts, :resume, %{})
 
     calls
@@ -26,8 +38,8 @@ defmodule WardrikCore.ToolRunner do
       on_timeout: :kill_task
     )
     |> Enum.zip_with(calls, fn
-      {:ok, outcome}, call -> {call, outcome}
-      {:exit, reason}, call -> {call, exited(context, call, reason)}
+      {:ok, {outcome, measured}}, call -> {call, outcome, measured}
+      {:exit, reason}, call -> {call, exited(context, call, reason), %{}}
     end)
   end
 
@@ -41,13 +53,13 @@ defmodule WardrikCore.ToolRunner do
 
   defp call(context, tool_call) do
     case Context.run(context, {:tool_call, tool_call}, &execute/1) do
-      {:ok, %Context{response: outcome}} -> outcome
-      {:error, reason} -> {:error, reason}
-      {:park, reason, _context} -> {:park, reason}
+      {:ok, %Context{response: outcome, measurements: measured}} -> {outcome, measured}
+      {:error, reason} -> {{:error, reason}, %{}}
+      {:park, reason, %Context{measurements: measured}} -> {{:park, reason}, measured}
     end
   catch
-    :error, reason -> {:error, Exception.normalize(:error, reason, __STACKTRACE__)}
-    kind, reason -> {:error, {kind, reason}}
+    :error, reason -> {{:error, Exception.normalize(:error, reason, __STACKTRACE__)}, %{}}
+    kind, reason -> {{:error, {kind, reason}}, %{}}
   end
 
   defp exited(context, call, reason) do

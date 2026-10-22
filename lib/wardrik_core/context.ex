@@ -5,11 +5,15 @@ defmodule WardrikCore.Context do
   Its private data stays with the agent from turn to turn, and through restarts. It's saved when a
   turn finishes or parks, and at each checkpoint. A turn that fails or crashes keeps only what its
   last checkpoint saved.
+
+  Each step is a span of the turn's trace, as OpenTelemetry has them. Give a step attributes with
+  `attribute/3`, and count what it used with `measure/3`. Both are reported when the step ends; see
+  `WardrikCore.Telemetry`. A step that returns `{:error, reason}` reports neither.
   """
   use WardrikCore.Private
   alias WardrikCore.Turn
 
-  @type step :: :turn | :generate | {:tool_call, WardrikCore.ToolCall.t()}
+  @type step :: :turn | :generate | {:tool_call, WardrikCore.ToolCall.t()} | {:step, String.t()}
   @type entry :: module() | {module(), term()}
 
   @type t() :: %__MODULE__{
@@ -18,7 +22,6 @@ defmodule WardrikCore.Context do
           step: step() | nil,
           messages: [ReqLLM.Message.t()],
           response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
-          usage: WardrikCore.Usage.t() | nil,
           capabilities: [entry()],
           tools: [WardrikCore.Tool.t()],
           middleware: [entry()],
@@ -28,7 +31,10 @@ defmodule WardrikCore.Context do
           checkpoint: (Turn.checkpoint() -> :ok) | nil,
           on_chunk: [(ReqLLM.StreamChunk.t() -> any())],
           private: map(),
-          metadata: map()
+          metadata: map(),
+          span: WardrikCore.Span.t() | nil,
+          attributes: map(),
+          measurements: %{optional(term()) => number()}
         }
 
   defstruct [
@@ -36,7 +42,7 @@ defmodule WardrikCore.Context do
     :model,
     :step,
     :response,
-    :usage,
+    :span,
     :resume,
     :checkpoint,
     messages: [],
@@ -47,7 +53,9 @@ defmodule WardrikCore.Context do
     timeout: :infinity,
     on_chunk: [],
     private: %{},
-    metadata: %{}
+    metadata: %{},
+    attributes: %{},
+    measurements: %{}
   ]
 
   def new(opts) do
@@ -66,6 +74,33 @@ defmodule WardrikCore.Context do
     |> then(& &1.(context))
   end
 
+  @doc """
+  Sets an attribute on the current step, as OpenTelemetry sets one on a span. Name it as
+  OpenTelemetry would, like `"gen_ai.tool.name"`, or under your own prefix.
+  """
+  @spec attribute(t(), String.t() | atom(), term()) :: t()
+  def attribute(%__MODULE__{attributes: attributes} = context, key, value),
+    do: %{context | attributes: Map.put(attributes, key, value)}
+
+  @doc """
+  Adds `amount` to a measurement, like tokens or dollars spent.
+
+  Measurements add up over the turn, and each step reports its own share when it ends. Core
+  measures each model call's `input_tokens` and `output_tokens`, and its `usd` when the model has a
+  price in dollars. A call to a model without one counts in `unpriced_calls`.
+  """
+  @spec measure(t(), term(), number()) :: t()
+  def measure(%__MODULE__{measurements: measurements} = context, key, amount),
+    do: %{context | measurements: Map.update(measurements, key, amount, &(&1 + amount))}
+
+  @doc "Adds each of `measurements`, like those `WardrikCore.evaluate/4` gives."
+  @spec measure(t(), map()) :: t()
+  def measure(%__MODULE__{} = context, measurements) do
+    Enum.reduce(measurements, context, fn {key, amount}, context ->
+      measure(context, key, amount)
+    end)
+  end
+
   @doc "Finds the tool a call names, or returns `nil`."
   @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil
   def tool(%__MODULE__{tools: tools}, %WardrikCore.ToolCall{name: name}),
@@ -76,12 +111,16 @@ defmodule WardrikCore.Context do
   def entry({module, opts}) when is_atom(module), do: {module, opts}
   def entry(module) when is_atom(module), do: {module, []}
 
-  @doc "Runs `fun` as `step`, then puts the outer `step` and `on_chunk` back."
+  @doc """
+  Runs `fun` through the middleware as `step`, in a span of its own, then puts the outer step back.
+
+  Name a step of your own `{:step, name}`, like `{:step, "summarize"}`.
+  """
   @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
   def run(%__MODULE__{} = context, step, fun) do
-    outer = Map.take(context, [:step, :on_chunk])
+    outer = Map.take(context, [:step, :on_chunk, :span, :attributes])
 
-    case run(%{context | step: step}, fun) do
+    case WardrikCore.Telemetry.span(context, step, &run(&1, fun)) do
       {:ok, context} -> {:ok, Map.merge(context, outer)}
       {:park, reason, context} -> {:park, reason, Map.merge(context, outer)}
       {:error, reason} -> {:error, reason}
