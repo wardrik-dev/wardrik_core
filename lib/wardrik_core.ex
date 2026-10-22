@@ -4,8 +4,8 @@ defmodule WardrikCore do
   through your code.
 
       children = [
-        {EKV, name: :agents_store, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
-        {WardrikCore, backend: {DurableServer.Backends.EKVStore, name: :agents_store}}
+        {WardrikCore.Backends.MemoryStore, name: :agents},
+        {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
       ]
 
       Supervisor.start_link(children, strategy: :rest_for_one)
@@ -16,8 +16,10 @@ defmodule WardrikCore do
       :ok = WardrikCore.ask(agent, "What's on fire?")
       WardrikCore.history(agent)
 
-  `ask/3` returns once the message is stored. If the node dies mid-turn, the agent picks
-  the message back up when it starts again.
+  `ask/3` returns once the message is stored. Agents kept in memory, as here, are gone when the
+  node stops. With a backend that keeps them, like a disk or an S3 bucket, an agent whose node dies
+  mid-turn picks the message back up when it starts again. The
+  [Run agents](running-agents.html#where-agents-are-kept) guide lists the backends.
 
   An agent runs one turn at a time. A message that arrives mid-turn ends that turn at its next
   step, and the next turn answers it. Tools come from `WardrikCore.Capability` modules. Every

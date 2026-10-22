@@ -10,20 +10,19 @@ person when they should, and run every call through your code.
 ```elixir
 def deps do
   [
-    {:wardrik_core, "~> 0.1"},
-    {:ekv, "~> 0.4"}
+    {:wardrik_core, "~> 0.1"}
   ]
 end
 ```
 
 ## Start an agent
 
-Let's run agents in your app, with their state kept in EKV:
+Let's run agents in your app. To begin, keep them in memory:
 
 ```elixir
 children = [
-  {EKV, name: :agents_store, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
-  {WardrikCore, backend: {DurableServer.Backends.EKVStore, name: :agents_store}}
+  {WardrikCore.Backends.MemoryStore, name: :agents},
+  {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
 ]
 
 Supervisor.start_link(children, strategy: :rest_for_one)
@@ -31,6 +30,10 @@ Supervisor.start_link(children, strategy: :rest_for_one)
 {:ok, agent} = WardrikCore.start_agent(agent_id: "triage", model: "anthropic:claude-haiku-4-5")
 :ok = WardrikCore.ask(agent, "What's on fire?")
 ```
+
+Agents in memory are gone when the node stops. To keep them through a restart, give `WardrikCore`
+a backend that stores them, like a disk or an S3 bucket. See
+[Where agents are kept](pages/running-agents.md#where-agents-are-kept).
 
 ## Guides
 
