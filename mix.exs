@@ -9,7 +9,7 @@ defmodule WardrikCore.MixProject do
       description:
         "Durable agents that run a model and its tools in a loop, and survive a crash.",
       package: package(),
-      docs: [main: "readme", extras: ["README.md"]],
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
@@ -38,7 +38,7 @@ defmodule WardrikCore.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => "https://github.com/wardrik-dev/wardrik_core"},
-      files: ~w(lib mix.exs README.md LICENSE)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
