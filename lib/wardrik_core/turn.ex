@@ -169,7 +169,12 @@ defmodule WardrikCore.Turn do
     with {:ok, streamed} <- ReqLLM.stream_text(context.model, context.messages, tools: tools),
          {:ok, response} <-
            ReqLLM.StreamResponse.process_stream(streamed, on_chunk: &dispatch(context, &1)) do
-      context = %{context | response: response}
+      context = %{
+        context
+        | response: response,
+          usage: WardrikCore.Usage.from_req_llm(response, context.model)
+      }
+
       {:ok, append_messages(context, [response.message])}
     end
   end

@@ -84,6 +84,20 @@ defmodule WardrikCore.TurnTest do
     assert {:ok, %Context{messages: [_user, %{role: :assistant}]}} = Turn.run(context)
   end
 
+  test "says what each model call used", %{context: context} do
+    response = %{answer("hello") | usage: %{input_tokens: 10, output_tokens: 4, total_cost: 0.01}}
+    expect(ReqLLM, :stream_text, fn _model, _messages, _opts -> {:ok, response} end)
+
+    assert {:ok,
+            %Context{usage: %WardrikCore.Usage{input_tokens: 10, output_tokens: 4, usd: 0.01}}} =
+             Turn.run(context)
+
+    expect(ReqLLM, :stream_text, fn _model, _messages, _opts -> {:ok, response} end)
+
+    assert {:ok, %Context{usage: %WardrikCore.Usage{input_tokens: 10, usd: nil}}} =
+             Turn.run(%{context | model: "zai_coding_plan:glm-5.3-flash"})
+  end
+
   test "offers the capabilities' tools to the model", %{context: context} do
     expect(ReqLLM, :stream_text, fn _model, _messages, opts ->
       assert [%ReqLLM.Tool{name: "echo"}] = opts[:tools]
