@@ -11,12 +11,12 @@ defmodule WardrikCore.Context do
           model: LLMDB.Model.t() | String.t(),
           step: step() | nil,
           messages: [ReqLLM.Message.t()],
-          # A model response for :generate, a tool's {:ok, _} | {:error, _} for :tool_call.
           response: ReqLLM.Response.t() | {:ok, term()} | {:error, term()} | nil,
           capabilities: [module()],
           tools: [WardrikCore.Tool.t()],
           middleware: [module()],
           max_rounds: pos_integer(),
+          timeout: timeout(),
           resume: {reason :: term(), input :: term()} | nil,
           checkpoint: (Turn.checkpoint() -> :ok) | nil,
           metadata: map()
@@ -34,6 +34,7 @@ defmodule WardrikCore.Context do
     tools: [],
     middleware: [],
     max_rounds: 25,
+    timeout: :infinity,
     metadata: %{}
   ]
 

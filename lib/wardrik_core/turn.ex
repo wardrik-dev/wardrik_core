@@ -5,7 +5,6 @@ defmodule WardrikCore.Turn do
   alias WardrikCore.Context
   alias WardrikCore.ToolRunner
 
-  @typedoc "A batch of tool calls about to run, and where the turn stood when it asked for them."
   @type checkpoint :: %{
           messages: [ReqLLM.Message.t()],
           calls: [ReqLLM.ToolCall.t()],

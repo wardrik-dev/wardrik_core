@@ -1,8 +1,6 @@
 defmodule WardrikCore.Tool do
   @moduledoc """
-  A tool an agent may call. `run` is handed the validated arguments and the
-  call's context, whose `step` holds the call. `meta` is the tool's own data,
-  for middleware to read; the core reads only `:timeout`, in milliseconds.
+  A tool an agent may call.
   """
   alias ReqLLM.ToolCall
   alias WardrikCore.Context
@@ -30,7 +28,6 @@ defmodule WardrikCore.Tool do
         name: tool.name,
         description: tool.description,
         parameter_schema: tool.schema,
-        # The model is offered this tool, but WardrikCore runs it; see call/3.
         callback: fn _args -> {:error, :run_by_wardrik_core} end
       )
 

@@ -19,7 +19,7 @@ defmodule WardrikCore.ToolRunner do
     resume = Keyword.get(opts, :resume, %{})
 
     WardrikCore.TaskSupervisor
-    |> Task.Supervisor.async_stream_nolink(
+    |> Task.Supervisor.async_stream(
       calls,
       &call(%{context | resume: Map.get(resume, &1.id)}, &1),
       ordered: true,
@@ -47,6 +47,9 @@ defmodule WardrikCore.ToolRunner do
       {:error, reason} -> {:error, reason}
       {:park, reason, _context} -> {:park, reason}
     end
+  catch
+    :error, reason -> {:error, Exception.normalize(:error, reason, __STACKTRACE__)}
+    kind, reason -> {:error, {kind, reason}}
   end
 
   defp execute(%Context{step: {:tool_call, call}, tools: tools} = context),
@@ -67,9 +70,6 @@ defmodule WardrikCore.ToolRunner do
   defp message(reason) when is_binary(reason), do: reason
   defp message(%{__exception__: true} = error), do: Exception.message(error)
   defp message(%{error: error}) when is_binary(error), do: error
-
-  defp message({:exit, {%{__exception__: true} = error, _stacktrace}}),
-    do: Exception.message(error)
 
   defp message(reason), do: inspect(reason)
 end

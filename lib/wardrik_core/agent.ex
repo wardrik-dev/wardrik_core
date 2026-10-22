@@ -45,6 +45,14 @@ defmodule WardrikCore.Agent do
 
   def handle_call({:checkpoint, _checkpoint}, _from, state), do: {:reply, :stale, state}
 
+  def handle_call(:interrupt, _from, %State{state: :running} = state),
+    do: {:reply, :ok, stop_running(state, :interrupted), {:continue, :maybe_run}, sync: true}
+
+  def handle_call(:interrupt, _from, %State{state: :waiting} = state),
+    do: {:reply, :ok, unanswered(state), {:continue, :maybe_run}, sync: true}
+
+  def handle_call(:interrupt, _from, state), do: {:reply, {:error, :idle}, state}
+
   @impl true
   def handle_cast({:ask, text}, %State{} = state) when is_binary(text) do
     message = ReqLLM.Context.user(text)
@@ -86,6 +94,11 @@ defmodule WardrikCore.Agent do
     {:noreply, unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 
+  def handle_info({:turn_timeout, ref}, %State{task: %Task{ref: ref}} = state),
+    do: {:noreply, stop_running(state, :timeout), {:continue, :maybe_run}, sync: true}
+
+  def handle_info({:turn_timeout, _ref}, state), do: {:noreply, state}
+
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
 
   def handle_info(message, state) do
@@ -116,7 +129,23 @@ defmodule WardrikCore.Agent do
     })
 
     task = Task.Supervisor.async(WardrikCore.TaskSupervisor, fun)
+    arm_timeout(state.context.timeout, task)
     %{state | state: :running, task: task, started_at: System.monotonic_time()}
+  end
+
+  defp arm_timeout(:infinity, _task), do: :ok
+  defp arm_timeout(ms, task), do: Process.send_after(self(), {:turn_timeout, task.ref}, ms)
+
+  defp stop_running(state, outcome) do
+    case Task.shutdown(state.task, :brutal_kill) do
+      {:ok, result} ->
+        stop_turn(state, elem(result, 0))
+        finished(state, result)
+
+      _stopped ->
+        stop_turn(state, outcome)
+        unanswered(state)
+    end
   end
 
   defp stop_turn(state, outcome) do

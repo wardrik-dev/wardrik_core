@@ -17,8 +17,6 @@ end
 
 defmodule WardrikCore.Test.ParkTools do
   @moduledoc false
-  # An approval workflow, as a middleware: every tool call parks until the
-  # resume input maps its id to :approve or {:deny, reason}.
   @behaviour WardrikCore.Middleware
 
   alias WardrikCore.Context
@@ -40,7 +38,6 @@ end
 
 defmodule WardrikCore.Test.ParkGenerate do
   @moduledoc false
-  # Asks before every model call; :ok resumes the one it parked on.
   @behaviour WardrikCore.Middleware
 
   alias WardrikCore.Context

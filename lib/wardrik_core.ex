@@ -15,7 +15,8 @@ defmodule WardrikCore do
       Context.new(
         agent_id: agent_id,
         capabilities: opts[:capabilities] || [],
-        middleware: opts[:middleware] || []
+        middleware: opts[:middleware] || [],
+        timeout: opts[:timeout] || :infinity
       )
 
     state = State.new(agent_id: agent_id, model: opts[:model], context: context)
@@ -28,14 +29,15 @@ defmodule WardrikCore do
 
   def ask(agent, text), do: GenServer.cast(agent, {:ask, text})
 
-  @doc "Why a parked agent is waiting, as its turn parked; `nil` when it isn't."
+  @doc "Stops the running or parked turn."
+  @spec interrupt(GenServer.server()) :: :ok | {:error, :idle}
+  def interrupt(agent), do: GenServer.call(agent, :interrupt)
+
+  @doc "Why the agent is parked, or `nil`."
   @spec parked(GenServer.server()) :: term() | nil
   def parked(agent), do: GenServer.call(agent, :parked)
 
-  @doc """
-  Re-enters a parked turn where it stopped, handing `input` to the middleware
-  that parked it; see `WardrikCore.Turn.resume/3`.
-  """
+  @doc "Re-enters a parked turn with `input`."
   @spec resume(GenServer.server(), term()) :: :ok | {:error, :not_parked}
   def resume(agent, input), do: GenServer.call(agent, {:resume, input})
 end

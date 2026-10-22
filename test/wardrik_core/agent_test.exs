@@ -7,7 +7,6 @@ defmodule WardrikCore.AgentTest do
 
   alias WardrikCore.Test.Echo
 
-  # A tool that tells the test it is running, then waits to be released.
   defmodule Blocking do
     @behaviour WardrikCore.Capability
 
@@ -114,6 +113,62 @@ defmodule WardrikCore.AgentTest do
              agent_state(agent)
 
     assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
+  end
+
+  describe "interrupt/1" do
+    test "stops a running turn and its tools, then runs what was queued behind it" do
+      Process.register(self(), WardrikCore.AgentTest)
+
+      ReqLLM
+      |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("call-a", "block")])} end)
+      |> expect(:stream_text, fn _, messages, _ ->
+        assert [:user, :user] = Enum.map(messages, & &1.role)
+        {:ok, answer("done")}
+      end)
+
+      {id, agent} = start_agent(capabilities: [Blocking])
+      WardrikCore.ask(agent, "first")
+      assert_receive {:tool_running, "call-a", tool}
+      WardrikCore.ask(agent, "second")
+      tool_ref = Process.monitor(tool)
+
+      assert :ok = WardrikCore.interrupt(agent)
+      assert_receive {:DOWN, ^tool_ref, :process, _pid, _reason}
+      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :interrupted}}
+      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+
+      assert %{state: :idle, checkpoint: nil, messages: messages} = agent_state(agent)
+      assert [:user, :user, :assistant] = Enum.map(messages, & &1.role)
+    end
+
+    test "drops a parked turn without its unanswered tool request" do
+      expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo")])} end)
+
+      {id, agent} = start_agent(middleware: [ParkTools])
+      WardrikCore.ask(agent, "hi")
+      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :park}}
+
+      assert :ok = WardrikCore.interrupt(agent)
+
+      assert %{state: :idle, parked: nil, messages: [%{role: :user}]} = agent_state(agent)
+      assert {:error, :not_parked} = WardrikCore.resume(agent, %{"1" => :approve})
+    end
+
+    test "has nothing to stop on an idle agent" do
+      {_id, agent} = start_agent()
+
+      assert {:error, :idle} = WardrikCore.interrupt(agent)
+    end
+  end
+
+  test "a turn past its timeout is stopped" do
+    expect(ReqLLM, :stream_text, fn _, _, _ -> receive do: (:never -> :ok) end)
+
+    {id, agent} = start_agent(timeout: 50)
+    WardrikCore.ask(agent, "hi")
+
+    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :timeout}}
+    assert %{state: :idle, messages: [%{role: :user}]} = agent_state(agent)
   end
 
   test "an unknown cast is ignored" do
