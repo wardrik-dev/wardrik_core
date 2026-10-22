@@ -34,7 +34,7 @@ defmodule WardrikCore.AgentTest do
     :telemetry.attach(handler, [:wardrik_core, :turn, :stop], &__MODULE__.turn_stopped/4, self())
     on_exit(fn -> :telemetry.detach(handler) end)
 
-    stub(ReqLLM.StreamResponse, :process_stream, fn response -> {:ok, response} end)
+    stub(ReqLLM.StreamResponse, :process_stream, fn response, _opts -> {:ok, response} end)
     :ok
   end
 

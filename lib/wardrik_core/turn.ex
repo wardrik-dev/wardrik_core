@@ -130,11 +130,15 @@ defmodule WardrikCore.Turn do
   defp append_messages(context, messages),
     do: %{context | messages: context.messages ++ messages}
 
+  defp dispatch(%Context{on_chunk: handlers}, chunk),
+    do: Enum.each(handlers, fn handler -> handler.(chunk) end)
+
   defp generate(%Context{} = context) do
     tools = Enum.map(context.tools, fn tool -> tool.req_llm end)
 
     with {:ok, streamed} <- ReqLLM.stream_text(context.model, context.messages, tools: tools),
-         {:ok, response} <- ReqLLM.StreamResponse.process_stream(streamed) do
+         {:ok, response} <-
+           ReqLLM.StreamResponse.process_stream(streamed, on_chunk: &dispatch(context, &1)) do
       context = %{context | response: response}
       {:ok, append_messages(context, [response.message])}
     end

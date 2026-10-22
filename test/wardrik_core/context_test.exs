@@ -41,4 +41,13 @@ defmodule WardrikCore.ContextTest do
                Context.run(context, fn _ -> flunk("next should not run") end)
     end
   end
+
+  test "run/3 keeps chunk handlers to the step that added them" do
+    handler = fn _chunk -> :ok end
+
+    assert {:ok, %Context{on_chunk: [], step: nil}} =
+             Context.run(Context.new([]), :generate, fn context ->
+               {:ok, %{context | on_chunk: [handler | context.on_chunk]}}
+             end)
+  end
 end

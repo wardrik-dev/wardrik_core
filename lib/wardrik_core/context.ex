@@ -19,6 +19,7 @@ defmodule WardrikCore.Context do
           timeout: timeout(),
           resume: {reason :: term(), input :: term()} | nil,
           checkpoint: (Turn.checkpoint() -> :ok) | nil,
+          on_chunk: [(ReqLLM.StreamChunk.t() -> any())],
           metadata: map()
         }
 
@@ -35,6 +36,7 @@ defmodule WardrikCore.Context do
     middleware: [],
     max_rounds: 25,
     timeout: :infinity,
+    on_chunk: [],
     metadata: %{}
   ]
 
@@ -51,12 +53,14 @@ defmodule WardrikCore.Context do
     |> then(& &1.(context))
   end
 
-  @doc "Runs `fun` as `step`, restoring the context's own step on the way out."
+  @doc "Runs `fun` as `step`, restoring the outer `step` and `on_chunk` on the way out."
   @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
-  def run(%__MODULE__{step: outer} = context, step, fun) do
+  def run(%__MODULE__{} = context, step, fun) do
+    outer = Map.take(context, [:step, :on_chunk])
+
     case run(%{context | step: step}, fun) do
-      {:ok, context} -> {:ok, %{context | step: outer}}
-      {:park, reason, context} -> {:park, reason, %{context | step: outer}}
+      {:ok, context} -> {:ok, Map.merge(context, outer)}
+      {:park, reason, context} -> {:park, reason, Map.merge(context, outer)}
       {:error, reason} -> {:error, reason}
     end
   end

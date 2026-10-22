@@ -10,6 +10,18 @@ defmodule WardrikCore.TurnTest do
   alias WardrikCore.Test.ParkTools
   alias WardrikCore.Turn
 
+  defmodule Stream do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(%Context{step: :generate, metadata: %{test: pid}} = context, next) do
+      handler = fn chunk -> send(pid, {:chunk, chunk}) end
+      next.(%{context | on_chunk: [handler | context.on_chunk]})
+    end
+
+    def call(context, next), do: next.(context)
+  end
+
   defmodule Report do
     @behaviour WardrikCore.Middleware
 
@@ -21,7 +33,7 @@ defmodule WardrikCore.TurnTest do
   end
 
   setup do
-    stub(ReqLLM.StreamResponse, :process_stream, fn response -> {:ok, response} end)
+    stub(ReqLLM.StreamResponse, :process_stream, fn response, _opts -> {:ok, response} end)
 
     context =
       Context.new(
@@ -91,6 +103,23 @@ defmodule WardrikCore.TurnTest do
     Turn.yield(self())
 
     assert {:ok, %Context{response: nil, messages: [%{role: :user}]}} = Turn.run(context)
+  end
+
+  test "middleware sees each streamed chunk once per model call", %{context: context} do
+    stub(ReqLLM.StreamResponse, :process_stream, fn response, opts ->
+      opts[:on_chunk].(ReqLLM.StreamChunk.text("hi"))
+      {:ok, response}
+    end)
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo", %{text: "a"})])} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    assert {:ok, _} = Turn.run(%{context | middleware: [Stream]})
+
+    assert_receive {:chunk, %ReqLLM.StreamChunk{type: :content, text: "hi"}}
+    assert_receive {:chunk, %ReqLLM.StreamChunk{type: :content, text: "hi"}}
+    refute_receive {:chunk, _}
   end
 
   test "a model error fails the turn", %{context: context} do
