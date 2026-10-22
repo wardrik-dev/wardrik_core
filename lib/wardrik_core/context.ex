@@ -1,7 +1,12 @@
 defmodule WardrikCore.Context do
   @moduledoc """
   The token threaded through a turn's middleware, like a `Req.Request`.
+
+  Its private data stays with the agent from turn to turn, and through restarts. It's saved when a
+  turn finishes or parks, and at each checkpoint. A turn that fails or crashes keeps only what its
+  last checkpoint saved.
   """
+  use WardrikCore.Private
   alias WardrikCore.Turn
 
   @type step :: :turn | :generate | {:tool_call, WardrikCore.ToolCall.t()}
@@ -21,6 +26,7 @@ defmodule WardrikCore.Context do
           resume: WardrikCore.Resume.t() | nil,
           checkpoint: (Turn.checkpoint() -> :ok) | nil,
           on_chunk: [(ReqLLM.StreamChunk.t() -> any())],
+          private: map(),
           metadata: map()
         }
 
@@ -38,6 +44,7 @@ defmodule WardrikCore.Context do
     max_rounds: 25,
     timeout: :infinity,
     on_chunk: [],
+    private: %{},
     metadata: %{}
   ]
 

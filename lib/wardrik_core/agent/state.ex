@@ -33,6 +33,7 @@ defmodule WardrikCore.Agent.State do
     :max_rounds,
     :timeout,
     :metadata,
+    :private,
     :messages
   ]
 

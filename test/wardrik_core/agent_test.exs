@@ -20,6 +20,21 @@ defmodule WardrikCore.AgentTest do
     def call(context, next, _opts), do: next.(context)
   end
 
+  defmodule Counter do
+    @behaviour WardrikCore.Middleware
+
+    alias WardrikCore.Context
+
+    @impl true
+    def call(%Context{step: :turn} = context, next, _opts) do
+      context = Context.update_private(context, __MODULE__, 1, &(&1 + 1))
+      send(WardrikCore.AgentTest, {:turns, Context.get_private(context, __MODULE__)})
+      next.(context)
+    end
+
+    def call(context, next, _opts), do: next.(context)
+  end
+
   defmodule Blocking do
     @behaviour WardrikCore.Capability
 
@@ -341,6 +356,27 @@ defmodule WardrikCore.AgentTest do
     {id, _agent} = start_agent()
 
     assert id in WardrikCore.list()
+  end
+
+  test "private data stays with the agent across turns and restarts" do
+    Process.register(self(), WardrikCore.AgentTest)
+    stub(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent(middleware: [Counter])
+
+    for expected <- [1, 2] do
+      :ok = WardrikCore.ask(agent, "hi")
+      assert_receive {:turns, ^expected}
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+    end
+
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}
+
+    {^id, agent} = start_agent(agent_id: id, middleware: [Counter])
+    :ok = WardrikCore.ask(agent, "hi")
+    assert_receive {:turns, 3}
   end
 
   test "an unknown cast is ignored" do

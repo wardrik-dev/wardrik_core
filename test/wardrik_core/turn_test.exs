@@ -198,7 +198,8 @@ defmodule WardrikCore.TurnTest do
         messages: context.messages ++ [assistant],
         calls: Enum.map(assistant.tool_calls, &WardrikCore.ToolCall.from_req_llm/1),
         rounds: 3,
-        metadata: %{trace: "t1"}
+        metadata: %{trace: "t1"},
+        private: %{}
       }
 
       expect(ReqLLM, :stream_text, fn _, messages, _ ->

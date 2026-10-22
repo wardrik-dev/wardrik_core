@@ -8,7 +8,8 @@ defmodule WardrikCore.Turn do
           messages: [ReqLLM.Message.t()],
           calls: [WardrikCore.ToolCall.t()],
           rounds: non_neg_integer(),
-          metadata: map()
+          metadata: map(),
+          private: map()
         }
 
   @spec run(Context.t()) :: WardrikCore.Middleware.result()
@@ -36,7 +37,13 @@ defmodule WardrikCore.Turn do
         %{messages: messages, calls: calls, rounds: rounds} = checkpoint
       ) do
     metadata = Map.merge(context.metadata, checkpoint.metadata)
-    context = %{with_tools(context) | messages: messages, metadata: metadata}
+
+    context = %{
+      with_tools(context)
+      | messages: messages,
+        metadata: metadata,
+        private: checkpoint.private
+    }
 
     Context.run(context, :turn, fn context ->
       continue(context, ToolRunner.run(context, calls), rounds)
@@ -115,7 +122,8 @@ defmodule WardrikCore.Turn do
       messages: context.messages,
       calls: calls,
       rounds: rounds,
-      metadata: context.metadata
+      metadata: context.metadata,
+      private: context.private
     }
 
     :ok = save_checkpoint(context, checkpoint)

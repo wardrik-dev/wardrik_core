@@ -83,7 +83,8 @@ defmodule WardrikCore.Agent do
       agent_id: state.agent_id
     })
 
-    {:reply, :ok, %{state | checkpoint: checkpoint, parked: nil}, sync: true}
+    state = %{keep_private(state, checkpoint.private) | checkpoint: checkpoint, parked: nil}
+    {:reply, :ok, state, sync: true}
   end
 
   def handle_call({:checkpoint, _checkpoint}, _from, state), do: {:reply, :stale, state}
@@ -201,7 +202,7 @@ defmodule WardrikCore.Agent do
 
   defp finished(state, {:ok, context}),
     do: %{
-      state
+      keep_private(state, context.private)
       | state: :idle,
         task: nil,
         parked: nil,
@@ -214,7 +215,7 @@ defmodule WardrikCore.Agent do
     Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
 
     %{
-      state
+      keep_private(state, context.private)
       | state: :waiting,
         task: nil,
         checkpoint: nil,
@@ -226,6 +227,8 @@ defmodule WardrikCore.Agent do
     Logger.error("Turn failed for agent #{state.agent_id}: #{inspect(reason)}")
     unanswered(state)
   end
+
+  defp keep_private(state, private), do: put_in(state.context.private, private)
 
   defp unanswered(state),
     do: %{
