@@ -15,18 +15,20 @@ defmodule WardrikCore do
       :ok = WardrikCore.ask(agent, "What's on fire?")
       WardrikCore.history(agent)
 
-  An agent runs one turn at a time. `ask/3` returns once the message is stored, so it survives
-  a crash; a message sent during a turn ends that turn at its next step and starts the next.
-  Tools come from `WardrikCore.Capability` modules, and every model and tool call passes
-  through `WardrikCore.Middleware`. `WardrikCore.Telemetry` lists the events an agent emits.
+  `ask/3` returns once the message is stored. If the node dies mid-turn, the agent picks
+  the message back up when it starts again.
 
-  Give `name:` to the child to run more than one instance, and pass it as the first argument.
+  An agent runs one turn at a time. A message that arrives mid-turn ends that turn at its next
+  step, and the next turn answers it. Tools come from `WardrikCore.Capability` modules. Every
+  model call and tool call runs through `WardrikCore.Middleware`.
+
+  To run more than one instance, give the child a `name:` and pass it as the first argument.
   """
 
   alias WardrikCore.Agent.State
   alias WardrikCore.Context
 
-  @doc "Runs agents under your tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s options."
+  @doc "Runs agents under your supervision tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s options."
   def child_spec(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
 
@@ -39,7 +41,7 @@ defmodule WardrikCore do
 
   @config [:capabilities, :middleware, :timeout, :max_rounds, :metadata]
 
-  @doc "Starts the agent `:agent_id`, or loads it as it was saved."
+  @doc "Starts an agent, or loads it if it was saved before."
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_agent(instance \\ __MODULE__, opts) do
     opts = Keyword.validate!(opts, [:agent_id, :model | @config])
@@ -54,7 +56,7 @@ defmodule WardrikCore do
     end
   end
 
-  @doc "Replaces the agent's model or settings, from its next turn."
+  @doc "Changes an agent's model or settings. The change applies from its next turn."
   @spec configure(GenServer.server(), keyword()) :: :ok
   def configure(agent, opts) do
     opts =
@@ -65,7 +67,7 @@ defmodule WardrikCore do
     GenServer.call(agent, {:configure, opts})
   end
 
-  @doc "The ids of every saved agent."
+  @doc "Lists the id of every saved agent."
   @spec list(atom()) :: [String.t()]
   def list(instance \\ __MODULE__) do
     instance
@@ -74,7 +76,7 @@ defmodule WardrikCore do
     |> Enum.map(fn info -> info.key end)
   end
 
-  @doc "The running agent `agent_id`, or `nil`."
+  @doc "Finds the running agent for `agent_id`, or returns `nil`."
   @spec whereis(atom(), String.t()) :: pid() | nil
   def whereis(instance \\ __MODULE__, agent_id) do
     case DurableServer.Supervisor.lookup(agents(instance), agent_id) do
@@ -83,7 +85,7 @@ defmodule WardrikCore do
     end
   end
 
-  @doc "Queues a message, returning once it is stored. A running turn yields to it."
+  @doc "Queues a message and returns once it's stored. A running turn stops at its next step so the next turn can answer it."
   @spec ask(GenServer.server(), String.t(), map()) :: :ok
   def ask(agent, text, metadata \\ %{}) when is_binary(text) and is_map(metadata),
     do: GenServer.call(agent, {:ask, text, metadata})
@@ -98,17 +100,22 @@ defmodule WardrikCore do
   @spec stop(GenServer.server()) :: :ok
   def stop(agent), do: GenServer.call(agent, :stop)
 
-  @doc "Stops the running or parked turn."
+  @doc "Stops the turn that's running or parked."
   @spec interrupt(GenServer.server()) :: :ok | {:error, :idle}
   def interrupt(agent), do: GenServer.call(agent, :interrupt)
 
-  @doc "Why the agent is parked, or `nil`."
+  @doc "Says why the agent is parked, or returns `nil` if it isn't."
   @spec parked(GenServer.server()) :: term() | nil
   def parked(agent), do: GenServer.call(agent, :parked)
 
-  @doc "Re-enters a parked turn with `input`."
-  @spec resume(GenServer.server(), term()) :: :ok | {:error, :not_parked}
-  def resume(agent, input), do: GenServer.call(agent, {:resume, input})
+  @doc """
+  Carries on a parked turn, handing `input` to whatever parked it.
+
+  `metadata` is yours, like who answered. It's reported on the resumed turn's start event.
+  """
+  @spec resume(GenServer.server(), term(), map()) :: :ok | {:error, :not_parked}
+  def resume(agent, input, metadata \\ %{}) when is_map(metadata),
+    do: GenServer.call(agent, {:resume, input, metadata})
 
   defp agents(instance), do: Module.concat(instance, Agents)
 end

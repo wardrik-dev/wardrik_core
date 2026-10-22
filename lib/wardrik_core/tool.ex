@@ -35,22 +35,22 @@ defmodule WardrikCore.Tool do
     %{tool | req_llm: req_llm}
   end
 
-  @doc "Stores `value` under `key` in the tool's private data, kept for the package that owns `key`."
+  @doc "Puts `value` in the tool's private data under `key`. Use your package's module as the key."
   @spec put_private(t(), term(), term()) :: t()
   def put_private(%__MODULE__{} = tool, key, value),
     do: %{tool | private: Map.put(tool.private, key, value)}
 
-  @doc "The value under `key` in the tool's private data, or `default`."
+  @doc "Gets the value under `key` from the tool's private data, or `default`."
   @spec get_private(t(), term(), term()) :: term()
   def get_private(%__MODULE__{} = tool, key, default \\ nil),
     do: Map.get(tool.private, key, default)
 
-  @doc "Updates the value under `key` in the tool's private data with `fun`, or sets `default`."
+  @doc "Updates the value under `key` with `fun`. Sets `default` if there's nothing there yet."
   @spec update_private(t(), term(), term(), (term() -> term())) :: t()
   def update_private(%__MODULE__{} = tool, key, default, fun),
     do: %{tool | private: Map.update(tool.private, key, default, fun)}
 
-  @doc "Runs the tool `call` names, from `tools`, with its validated arguments."
+  @doc "Runs the tool a call names, with its arguments checked against the tool's schema."
   @spec call([t()], ToolCall.t(), Context.t()) :: answer()
   def call(tools, %ToolCall{} = call, %Context{} = context) do
     with %__MODULE__{} = tool <-

@@ -14,6 +14,6 @@ defmodule WardrikCore.Middleware do
   @type result :: {:ok, context()} | {:error, term()} | {:park, term(), context()}
   @type next :: (context() -> result())
 
-  @doc "Provided with the current context, a next function to call and its options, returns a new context or an error."
+  @doc "Takes the context, the `next` function and your options. Call `next` to carry on, or return early to stop."
   @callback call(context, next, opts :: term()) :: result()
 end

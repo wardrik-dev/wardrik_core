@@ -1,6 +1,7 @@
 defmodule WardrikCore.Turn do
   @moduledoc false
   alias WardrikCore.Context
+  alias WardrikCore.Resume
   alias WardrikCore.ToolRunner
 
   @type checkpoint :: %{
@@ -20,10 +21,10 @@ defmodule WardrikCore.Turn do
   @doc """
   Re-enters a turn where it parked.
   """
-  @spec resume(Context.t(), term(), term()) :: WardrikCore.Middleware.result()
-  def resume(%Context{} = context, reason, input) do
-    context = %{with_tools(context) | resume: {reason, input}}
-    Context.run(context, :turn, fn context -> reenter(context, reason, input) end)
+  @spec resume(Context.t(), Resume.t()) :: WardrikCore.Middleware.result()
+  def resume(%Context{} = context, %Resume{} = resume) do
+    context = %{with_tools(context) | resume: resume}
+    Context.run(context, :turn, fn context -> reenter(context, resume) end)
   end
 
   @doc """
@@ -49,23 +50,23 @@ defmodule WardrikCore.Turn do
     :ok
   end
 
-  defp reenter(context, {:tool_calls, results}, input) do
+  defp reenter(context, %Resume{reason: {:tool_calls, results}} = resume) do
     context = clear_resume(context)
     parked = parked_calls(results)
     calls = Enum.map(parked, fn {call, _reason} -> call end)
-    rerun = ToolRunner.run(context, calls, resume: resume_inputs(parked, input))
+    rerun = ToolRunner.run(context, calls, resume: resume_each(parked, resume))
 
     continue(context, replace_outcomes(results, rerun), context.max_rounds)
   end
 
-  defp reenter(context, _reason, _input), do: loop(context, context.max_rounds)
+  defp reenter(context, _resume), do: loop(context, context.max_rounds)
 
   defp parked_calls(results) do
     for {call, {:park, reason}} <- results, do: {call, reason}
   end
 
-  defp resume_inputs(parked, input) do
-    Map.new(parked, fn {call, reason} -> {call.id, {reason, input}} end)
+  defp resume_each(parked, resume) do
+    Map.new(parked, fn {call, reason} -> {call.id, %{resume | reason: reason}} end)
   end
 
   defp replace_outcomes(results, rerun) do

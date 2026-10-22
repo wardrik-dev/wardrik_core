@@ -23,7 +23,10 @@ defmodule WardrikCore.Test.ParkTools do
 
   @impl true
   def call(
-        %Context{step: {:tool_call, call}, resume: {:needs_approval, input}} = context,
+        %Context{
+          step: {:tool_call, call},
+          resume: %WardrikCore.Resume{reason: :needs_approval, input: input}
+        } = context,
         next,
         _opts
       ) do
@@ -47,8 +50,13 @@ defmodule WardrikCore.Test.ParkGenerate do
   alias WardrikCore.Context
 
   @impl true
-  def call(%Context{step: :generate, resume: {:spend?, :ok}} = context, next, _opts),
-    do: next.(context)
+  def call(
+        %Context{step: :generate, resume: %WardrikCore.Resume{reason: :spend?, input: :ok}} =
+          context,
+        next,
+        _opts
+      ),
+      do: next.(context)
 
   def call(%Context{step: :generate} = context, _next, _opts), do: {:park, :spend?, context}
   def call(context, next, _opts), do: next.(context)

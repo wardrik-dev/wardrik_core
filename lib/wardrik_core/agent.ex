@@ -4,6 +4,7 @@ defmodule WardrikCore.Agent do
   use DurableServer, vsn: 1
 
   alias WardrikCore.Agent.State
+  alias WardrikCore.Resume
   alias WardrikCore.Telemetry
   alias WardrikCore.Turn
 
@@ -55,15 +56,22 @@ defmodule WardrikCore.Agent do
   def handle_call(:status, _from, state), do: {:reply, state.state, state}
   def handle_call(:stop, _from, state), do: {:stop, :permanent, :ok, state}
 
-  def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
+  def handle_call(
+        {:resume, input, metadata},
+        _from,
+        %State{state: :waiting, parked: parked} = state
+      ) do
     context = turn_context(state, parked.messages)
     context = %{context | metadata: Map.merge(context.metadata, parked.metadata)}
 
     {:reply, :ok,
-     start_turn(state, :resume, fn -> Turn.resume(context, parked.reason, input) end)}
+     start_turn(state, :resume, metadata, fn ->
+       Turn.resume(context, %Resume{reason: parked.reason, input: input, metadata: metadata})
+     end)}
   end
 
-  def handle_call({:resume, _input}, _from, state), do: {:reply, {:error, :not_parked}, state}
+  def handle_call({:resume, _input, _metadata}, _from, state),
+    do: {:reply, {:error, :not_parked}, state}
 
   def handle_call(:parked, _from, %State{state: :waiting, parked: parked} = state),
     do: {:reply, parked.reason, state}
@@ -156,10 +164,11 @@ defmodule WardrikCore.Agent do
     }
   end
 
-  defp start_turn(state, kind, fun) do
+  defp start_turn(state, kind, metadata \\ %{}, fun) do
     Telemetry.emit([:turn, :start], %{system_time: System.system_time()}, %{
       agent_id: state.agent_id,
-      kind: kind
+      kind: kind,
+      metadata: metadata
     })
 
     task = Task.async(fun)

@@ -18,7 +18,7 @@ defmodule WardrikCore.Context do
           middleware: [entry()],
           max_rounds: pos_integer(),
           timeout: timeout(),
-          resume: {reason :: term(), input :: term()} | nil,
+          resume: WardrikCore.Resume.t() | nil,
           checkpoint: (Turn.checkpoint() -> :ok) | nil,
           on_chunk: [(ReqLLM.StreamChunk.t() -> any())],
           metadata: map()
@@ -45,7 +45,7 @@ defmodule WardrikCore.Context do
     struct!(__MODULE__, opts)
   end
 
-  @doc "Runs `fun` wrapped in the context's middleware, first in the list outermost."
+  @doc "Runs `fun` through the context's middleware. The first middleware in the list runs first."
   @spec run(t(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
   def run(%__MODULE__{middleware: middleware} = context, fun) do
     middleware
@@ -57,17 +57,17 @@ defmodule WardrikCore.Context do
     |> then(& &1.(context))
   end
 
-  @doc "The tool `call` names, or `nil`."
+  @doc "Finds the tool a call names, or returns `nil`."
   @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil
   def tool(%__MODULE__{tools: tools}, %WardrikCore.ToolCall{name: name}),
     do: Enum.find(tools, &(&1.name == name))
 
-  @doc "A capability or middleware entry as `{module, opts}`."
+  @doc "Turns a capability or middleware entry into `{module, opts}`."
   @spec entry(entry()) :: {module(), term()}
   def entry({module, opts}) when is_atom(module), do: {module, opts}
   def entry(module) when is_atom(module), do: {module, []}
 
-  @doc "Runs `fun` as `step`, restoring the outer `step` and `on_chunk` on the way out."
+  @doc "Runs `fun` as `step`, then puts the outer `step` and `on_chunk` back."
   @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
   def run(%__MODULE__{} = context, step, fun) do
     outer = Map.take(context, [:step, :on_chunk])

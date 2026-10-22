@@ -63,7 +63,7 @@ end
 :ok = WardrikCore.ask(agent, "Where is order 1001?")
 ```
 
-Notice the orders arrive as the capability's options, `{MyApp.Orders, opts}`, so one module serves
+The orders arrive as the capability's options, `{MyApp.Orders, opts}`, so one module serves
 many agents. Each tool call runs in its own process: one that crashes or times out is answered with
 an error, and the turn carries on.
 
@@ -76,10 +76,15 @@ person before any tool runs:
 defmodule MyApp.Approve do
   @behaviour WardrikCore.Middleware
 
-  alias WardrikCore.Context
+  alias WardrikCore.{Context, Resume}
 
   @impl true
-  def call(%Context{step: {:tool_call, call}, resume: {:approval, decisions}} = context, next, _opts) do
+  def call(
+        %Context{step: {:tool_call, call}, resume: %Resume{reason: :approval, input: decisions}} =
+          context,
+        next,
+        _opts
+      ) do
     case Map.get(decisions, call.id) do
       :approve -> next.(context)
       {:deny, reason} -> {:error, reason}

@@ -5,7 +5,7 @@ defmodule WardrikCore.Telemetry do
     * `[:wardrik_core, :agent, :start]` - `state`
     * `[:wardrik_core, :agent, :stop]` - `reason`
     * `[:wardrik_core, :message, :queued]` - `message`; measures `queued`
-    * `[:wardrik_core, :turn, :start]` - `kind`
+    * `[:wardrik_core, :turn, :start]` - `kind`, and the `metadata` given to `resume/3`
     * `[:wardrik_core, :turn, :stop]` - `kind`, `outcome`; measures `duration`
     * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
     * `[:wardrik_core, :turn, :dropped]`

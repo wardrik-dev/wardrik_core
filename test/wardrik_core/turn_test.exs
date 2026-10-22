@@ -5,6 +5,7 @@ defmodule WardrikCore.TurnTest do
   import WardrikCore.Test.LLM
 
   alias WardrikCore.Context
+  alias WardrikCore.Resume
   alias WardrikCore.Test.Echo
   alias WardrikCore.Test.ParkGenerate
   alias WardrikCore.Test.ParkTools
@@ -215,7 +216,10 @@ defmodule WardrikCore.TurnTest do
       end)
 
       assert {:ok, %Context{messages: messages}} =
-               Turn.resume(context, parked, %{"1" => :approve, "2" => :approve})
+               Turn.resume(context, %Resume{
+                 reason: parked,
+                 input: %{"1" => :approve, "2" => :approve}
+               })
 
       assert [:user, :assistant, :tool, :tool, :assistant] = Enum.map(messages, & &1.role)
     end
@@ -230,16 +234,22 @@ defmodule WardrikCore.TurnTest do
       end)
 
       assert {:ok, _} =
-               Turn.resume(context, parked, %{"1" => :approve, "2" => {:deny, "not today"}})
+               Turn.resume(context, %Resume{
+                 reason: parked,
+                 input: %{"1" => :approve, "2" => {:deny, "not today"}}
+               })
     end
 
     test "undecided calls park the turn again", %{context: context, parked: parked} do
-      assert {:park, parked, _context} = Turn.resume(context, parked, %{"1" => :approve})
+      assert {:park, parked, _context} =
+               Turn.resume(context, %Resume{reason: parked, input: %{"1" => :approve}})
+
       assert {:tool_calls, [{%{id: "1"}, {:ok, "a"}}, {%{id: "2"}, {:park, _}}]} = parked
     end
 
     test "input that names no call leaves the turn parked", %{context: context, parked: parked} do
-      assert {:park, ^parked, _context} = Turn.resume(context, parked, %{})
+      assert {:park, ^parked, _context} =
+               Turn.resume(context, %Resume{reason: parked, input: %{}})
     end
   end
 
@@ -253,7 +263,7 @@ defmodule WardrikCore.TurnTest do
       end)
 
       assert {:park, :spend?, %Context{messages: messages}} =
-               Turn.resume(context, :spend?, :ok)
+               Turn.resume(context, %Resume{reason: :spend?, input: :ok})
 
       assert [:user, :assistant, :tool] = Enum.map(messages, & &1.role)
     end
