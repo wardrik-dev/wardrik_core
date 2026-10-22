@@ -33,10 +33,25 @@ defmodule WardrikCore.Agent.State do
     :middleware,
     :max_rounds,
     :timeout,
+    :principal,
     :metadata,
     :private,
     :messages
   ]
+
+  @doc "Splits off the messages the next turn answers: those in a row from the same principal."
+  @spec next_batch([ReqLLM.Message.t()]) :: {[ReqLLM.Message.t()], [ReqLLM.Message.t()]}
+  def next_batch([first | _messages] = pending),
+    do: Enum.split_while(pending, fn message -> same_principal?(message, first) end)
+
+  defp same_principal?(message, other), do: principal_id(message) == principal_id(other)
+
+  defp principal_id(message), do: message |> principal() |> id()
+
+  defp id(%WardrikCore.Principal{id: id}), do: id
+  defp id(nil), do: nil
+
+  defp principal(%ReqLLM.Message{metadata: metadata}), do: Map.get(metadata || %{}, :principal)
 
   def new(opts) do
     opts = Keyword.update!(opts, :model, &canonical_spec!/1)

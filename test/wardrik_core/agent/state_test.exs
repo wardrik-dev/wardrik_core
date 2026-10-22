@@ -112,4 +112,24 @@ defmodule WardrikCore.Agent.StateTest do
     do: term |> Tuple.to_list() |> serializable?()
 
   defp serializable?(_term), do: true
+
+  describe "next_batch/1" do
+    test "takes the messages in a row from one principal" do
+      maria = message("a", "user:maria")
+      again = message("b", "user:maria")
+      jon = message("c", "user:jon")
+      later = message("d", "user:maria")
+
+      assert {[^maria, ^again], [^jon, ^later]} = State.next_batch([maria, again, jon, later])
+    end
+
+    test "keeps messages no one signed together" do
+      assert {[_, _], []} = State.next_batch([message("a", nil), message("b", nil)])
+    end
+  end
+
+  defp message(text, nil), do: ReqLLM.Context.user(text, %{})
+
+  defp message(text, id),
+    do: ReqLLM.Context.user(text, %{principal: %WardrikCore.Principal{id: id}})
 end

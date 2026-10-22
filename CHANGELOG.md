@@ -10,6 +10,8 @@
 - Tool annotations, facts about a tool any package can read, like `read_only` and `idempotent`. A
   call lost in a crash is repeated only if its tool is idempotent, and parks as `:in_doubt`
   otherwise.
+- Principals, as in IAM. An agent has its own, a message can come from another, and the turn that
+  answers acts on their behalf. Each step's span says who it was for, as `enduser.id`.
 - A tool reports on its step, like what it cost, by answering with its context.
 - Every turn is a trace and every step a span, with attributes and measurements, reported as
   telemetry events.

@@ -74,4 +74,33 @@ defmodule WardrikCore.ContextTest do
     assert ^tool = Context.tool(context, %WardrikCore.ToolCall{id: "1", name: "echo"})
     assert nil == Context.tool(context, %WardrikCore.ToolCall{id: "2", name: "nope"})
   end
+
+  describe "acting_for/1" do
+    setup do
+      %{
+        agent: %WardrikCore.Principal{id: "agent:triage"},
+        maria: %WardrikCore.Principal{id: "user:maria"}
+      }
+    end
+
+    test "is whoever sent the latest message", %{agent: agent, maria: maria} do
+      messages = [
+        ReqLLM.Context.user("earlier", %{}),
+        ReqLLM.Context.user("now", %{principal: maria}),
+        ReqLLM.Context.assistant("on it")
+      ]
+
+      assert ^maria = Context.acting_for(Context.new(principal: agent, messages: messages))
+    end
+
+    test "is the agent itself when no one signed the message", %{agent: agent, maria: maria} do
+      messages = [
+        ReqLLM.Context.user("earlier", %{principal: maria}),
+        ReqLLM.Context.user("now", %{})
+      ]
+
+      assert ^agent = Context.acting_for(Context.new(principal: agent, messages: messages))
+      assert nil == Context.acting_for(Context.new(messages: []))
+    end
+  end
 end

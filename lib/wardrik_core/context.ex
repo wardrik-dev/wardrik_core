@@ -6,6 +6,9 @@ defmodule WardrikCore.Context do
   turn finishes or parks, and at each checkpoint. A turn that fails or crashes keeps only what its
   last checkpoint saved.
 
+  `principal` is the agent's own; see `WardrikCore.Principal`. `acting_for/1` gives who the turn
+  acts for.
+
   Each step is a span of the turn's trace, as OpenTelemetry has them. Give a step attributes with
   `attribute/3`, and count what it used with `measure/3`. Both are reported when the step ends; see
   `WardrikCore.Telemetry`. A step that returns `{:error, reason}` reports neither.
@@ -25,6 +28,7 @@ defmodule WardrikCore.Context do
           tools: [WardrikCore.Tool.t()],
           middleware: [entry()],
           max_rounds: pos_integer(),
+          principal: WardrikCore.Principal.t() | nil,
           timeout: timeout(),
           resume: WardrikCore.Resume.t() | nil,
           checkpoint: (map() -> :ok) | nil,
@@ -44,6 +48,7 @@ defmodule WardrikCore.Context do
     :span,
     :resume,
     :checkpoint,
+    :principal,
     messages: [],
     capabilities: [],
     tools: [],
@@ -99,6 +104,21 @@ defmodule WardrikCore.Context do
       measure(context, key, amount)
     end)
   end
+
+  @doc """
+  Gives who the turn acts for: the principal who sent its latest message, else the agent's own,
+  else `nil`.
+  """
+  @spec acting_for(t()) :: WardrikCore.Principal.t() | nil
+  def acting_for(%__MODULE__{messages: messages, principal: principal}) do
+    messages
+    |> Enum.reverse()
+    |> Enum.find(fn message -> message.role == :user end)
+    |> asked_by(principal)
+  end
+
+  defp asked_by(%{metadata: %{principal: %WardrikCore.Principal{} = asked}}, _agent), do: asked
+  defp asked_by(_message, agent), do: agent
 
   @doc "Finds the tool a call names, or returns `nil`."
   @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil

@@ -22,7 +22,7 @@ defmodule WardrikCore.Tool do
       this, it parks as `:in_doubt` until a person answers.
     * `:open_world`, it reaches things outside the agent's own systems, like the web.
     * `:timeout`, how long a call may take, in milliseconds.
-    * `:subjects`, what a call acts on, as a function of its arguments, like
+    * `:resources`, what a call acts on, as a function of its arguments, like
       `fn args -> [args["path"]] end`.
 
   The first four are MCP's tool annotations. A tool that doesn't say has none of them.

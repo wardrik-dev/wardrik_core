@@ -116,8 +116,9 @@ defmodule WardrikCore.Agent do
   end
 
   def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
-    context = turn_context(state, state.messages ++ state.pending_messages, Span.root())
-    state = %{state | in_flight: state.pending_messages, pending_messages: []}
+    {batch, rest} = State.next_batch(state.pending_messages)
+    context = turn_context(state, state.messages ++ batch, Span.root())
+    state = %{state | in_flight: batch, pending_messages: rest}
     {:noreply, start_turn(state, :run, context, fn -> Turn.run(context) end)}
   end
 

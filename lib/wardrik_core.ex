@@ -39,7 +39,7 @@ defmodule WardrikCore do
     |> Map.put(:id, name)
   end
 
-  @config [:capabilities, :middleware, :timeout, :max_rounds, :metadata]
+  @config [:capabilities, :middleware, :timeout, :max_rounds, :principal, :metadata]
 
   @doc "Starts an agent, or loads it if it was saved before."
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -85,7 +85,13 @@ defmodule WardrikCore do
     end
   end
 
-  @doc "Queues a message and returns once it's stored. A running turn stops at its next step so the next turn can answer it."
+  @doc """
+  Queues a message and returns once it's stored. A running turn stops at its next step so the next
+  turn can answer it.
+
+  Put the `WardrikCore.Principal` who asked in `metadata` as `:principal`, and the turn that answers
+  acts on their behalf. A turn answers the messages in a row from one principal, never two.
+  """
   @spec ask(GenServer.server(), String.t(), map()) :: :ok
   def ask(agent, text, metadata \\ %{}) when is_binary(text) and is_map(metadata),
     do: GenServer.call(agent, {:ask, text, metadata})

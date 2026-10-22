@@ -30,7 +30,7 @@ defmodule WardrikCore.Telemetry do
   @spec span(Context.t(), Context.step(), WardrikCore.Middleware.next()) ::
           WardrikCore.Middleware.result()
   def span(%Context{} = context, step, fun) do
-    inner = %{context | step: step, span: child(context, step), attributes: %{}}
+    inner = %{context | step: step, span: child(context, step), attributes: principals(context)}
     start = %{agent_id: inner.agent_id, span: inner.span, step: step}
 
     :telemetry.span([:wardrik_core, :step], start, fn ->
@@ -38,6 +38,15 @@ defmodule WardrikCore.Telemetry do
       {result, measured(result, context), Map.merge(start, ended(result))}
     end)
   end
+
+  defp principals(context) do
+    %{}
+    |> put_id("enduser.id", Context.acting_for(context))
+    |> put_id("wardrik.agent.principal.id", context.principal)
+  end
+
+  defp put_id(attributes, _key, nil), do: attributes
+  defp put_id(attributes, key, principal), do: Map.put(attributes, key, principal.id)
 
   defp child(%Context{span: nil}, _step), do: Span.root()
 

@@ -54,6 +54,7 @@ defmodule WardrikCore.AgentTest do
     end
   end
 
+  alias WardrikCore.Principal
   alias WardrikCore.Test.ParkTools
 
   setup :set_mimic_global
@@ -68,7 +69,8 @@ defmodule WardrikCore.AgentTest do
       [:wardrik_core, :turn, :start],
       [:wardrik_core, :turn, :stop],
       [:wardrik_core, :turn, :checkpoint],
-      [:wardrik_core, :turn, :dropped]
+      [:wardrik_core, :turn, :dropped],
+      [:wardrik_core, :step, :stop]
     ]
 
     :telemetry.attach_many(handler, events, &__MODULE__.handle_event/4, self())
@@ -314,6 +316,37 @@ defmodule WardrikCore.AgentTest do
     assert_receive {[:message, :queued], %{agent_id: ^id, message: %{metadata: %{from: "jon"}}}}
     assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
     assert [%{metadata: %{from: "jon"}}, _answer] = WardrikCore.history(agent)
+  end
+
+  test "a turn acts on behalf of whoever asked, and each step says so" do
+    expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent(principal: %Principal{id: "agent:triage"})
+    :ok = WardrikCore.ask(agent, "hi", %{principal: %Principal{id: "user:maria"}})
+
+    assert_receive {[:step, :stop],
+                    %{
+                      agent_id: ^id,
+                      step: :generate,
+                      attributes: %{
+                        "enduser.id" => "user:maria",
+                        "wardrik.agent.principal.id" => "agent:triage"
+                      }
+                    }}
+  end
+
+  test "a turn no one asked for acts as the agent itself" do
+    expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent(principal: %Principal{id: "agent:triage"})
+    :ok = WardrikCore.ask(agent, "hi")
+
+    assert_receive {[:step, :stop],
+                    %{
+                      agent_id: ^id,
+                      step: :generate,
+                      attributes: %{"enduser.id" => "agent:triage"}
+                    }}
   end
 
   test "whereis/1 finds a running agent by id" do
