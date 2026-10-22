@@ -143,7 +143,9 @@ defmodule WardrikCore.TurnTest do
 
       assert {:ok, _} = Turn.run(%{context | checkpoint: checkpoint})
 
-      assert_receive {:checkpoint, %{calls: [%{id: "1"}], rounds: 25, messages: messages}}
+      assert_receive {:checkpoint,
+                      %{calls: [%{id: "1"}], rounds: 25, messages: messages, metadata: %{test: _}}}
+
       assert [:user, :assistant] = Enum.map(messages, & &1.role)
     end
 
@@ -154,7 +156,8 @@ defmodule WardrikCore.TurnTest do
       checkpoint = %{
         messages: context.messages ++ [assistant],
         calls: assistant.tool_calls,
-        rounds: 3
+        rounds: 3,
+        metadata: %{trace: "t1"}
       }
 
       expect(ReqLLM, :stream_text, fn _, messages, _ ->
@@ -162,7 +165,9 @@ defmodule WardrikCore.TurnTest do
         {:ok, answer("done")}
       end)
 
-      assert {:ok, %Context{messages: messages}} = Turn.recover(context, checkpoint)
+      assert {:ok, %Context{messages: messages, metadata: %{trace: "t1", test: _}}} =
+               Turn.recover(context, checkpoint)
+
       assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
     end
   end

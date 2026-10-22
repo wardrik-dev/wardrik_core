@@ -6,6 +6,7 @@ defmodule WardrikCore.Agent do
   use DurableServer, vsn: 1
 
   alias WardrikCore.Agent.State
+  alias WardrikCore.Telemetry
   alias WardrikCore.Turn
 
   @impl DurableServer
@@ -24,13 +25,25 @@ defmodule WardrikCore.Agent do
     # credo:disable-for-next-line WardrikCore.Credo.Check.NoSelfSend
     send(self(), :maybe_run)
 
+    Telemetry.emit([:agent, :start], %{system_time: System.system_time()}, %{
+      agent_id: state.agent_id,
+      state: state.state
+    })
+
     {:ok, state}
   end
 
   @impl true
-  def handle_call({:ask, text}, _from, %State{} = state) do
+  def handle_call({:ask, text, metadata}, _from, %State{} = state) do
     if state.state == :running, do: Turn.yield(state.task.pid)
-    state = %{state | pending_messages: state.pending_messages ++ [ReqLLM.Context.user(text)]}
+    message = ReqLLM.Context.user(text, metadata)
+    state = %{state | pending_messages: state.pending_messages ++ [message]}
+
+    Telemetry.emit([:message, :queued], %{queued: length(state.pending_messages)}, %{
+      agent_id: state.agent_id,
+      message: message
+    })
+
     {:reply, :ok, state, {:continue, :maybe_run}, sync: true}
   end
 
@@ -40,7 +53,10 @@ defmodule WardrikCore.Agent do
 
   def handle_call({:resume, input}, _from, %State{state: :waiting, parked: parked} = state) do
     context = turn_context(state, parked.messages)
-    {:reply, :ok, start_turn(state, fn -> Turn.resume(context, parked.reason, input) end)}
+    context = %{context | metadata: Map.merge(context.metadata, Map.get(parked, :metadata, %{}))}
+
+    {:reply, :ok,
+     start_turn(state, :resume, fn -> Turn.resume(context, parked.reason, input) end)}
   end
 
   def handle_call({:resume, _input}, _from, state), do: {:reply, {:error, :not_parked}, state}
@@ -50,16 +66,23 @@ defmodule WardrikCore.Agent do
 
   def handle_call(:parked, _from, state), do: {:reply, nil, state}
 
-  def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state),
-    do: {:reply, :ok, %{state | checkpoint: checkpoint, parked: nil}, sync: true}
+  def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state) do
+    Telemetry.emit([:turn, :checkpoint], %{calls: length(checkpoint.calls)}, %{
+      agent_id: state.agent_id
+    })
+
+    {:reply, :ok, %{state | checkpoint: checkpoint, parked: nil}, sync: true}
+  end
 
   def handle_call({:checkpoint, _checkpoint}, _from, state), do: {:reply, :stale, state}
 
   def handle_call(:interrupt, _from, %State{state: :running} = state),
     do: {:reply, :ok, stop_running(state, :interrupted), {:continue, :maybe_run}, sync: true}
 
-  def handle_call(:interrupt, _from, %State{state: :waiting} = state),
-    do: {:reply, :ok, unanswered(state), {:continue, :maybe_run}, sync: true}
+  def handle_call(:interrupt, _from, %State{state: :waiting} = state) do
+    Telemetry.emit([:turn, :dropped], %{agent_id: state.agent_id})
+    {:reply, :ok, unanswered(state), {:continue, :maybe_run}, sync: true}
+  end
 
   def handle_call(:interrupt, _from, state), do: {:reply, {:error, :idle}, state}
 
@@ -72,13 +95,13 @@ defmodule WardrikCore.Agent do
   @impl true
   def handle_continue(:maybe_run, %State{state: :due, checkpoint: checkpoint} = state) do
     context = turn_context(state, checkpoint.messages)
-    {:noreply, start_turn(state, fn -> Turn.recover(context, checkpoint) end)}
+    {:noreply, start_turn(state, :recover, fn -> Turn.recover(context, checkpoint) end)}
   end
 
   def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
     context = turn_context(state, state.messages ++ state.pending_messages)
     state = %{state | in_flight: state.pending_messages, pending_messages: []}
-    {:noreply, start_turn(state, fn -> Turn.run(context) end)}
+    {:noreply, start_turn(state, :run, fn -> Turn.run(context) end)}
   end
 
   def handle_continue(:maybe_run, state), do: {:noreply, state}
@@ -111,8 +134,10 @@ defmodule WardrikCore.Agent do
   end
 
   @impl true
-  def terminate(_reason, %State{task: %Task{} = task}), do: Task.shutdown(task, :brutal_kill)
-  def terminate(_reason, _state), do: :ok
+  def terminate(reason, state) do
+    if state.task, do: Task.shutdown(state.task, :brutal_kill)
+    Telemetry.emit([:agent, :stop], %{agent_id: state.agent_id, reason: reason})
+  end
 
   defp turn_context(state, messages) do
     agent = self()
@@ -127,14 +152,15 @@ defmodule WardrikCore.Agent do
     }
   end
 
-  defp start_turn(state, fun) do
-    :telemetry.execute([:wardrik_core, :turn, :start], %{system_time: System.system_time()}, %{
-      agent_id: state.agent_id
+  defp start_turn(state, kind, fun) do
+    Telemetry.emit([:turn, :start], %{system_time: System.system_time()}, %{
+      agent_id: state.agent_id,
+      kind: kind
     })
 
     task = Task.Supervisor.async(WardrikCore.TaskSupervisor, fun)
     arm_timeout(state.context.timeout, task)
-    %{state | state: :running, task: task, started_at: System.monotonic_time()}
+    %{state | state: :running, task: task, turn_kind: kind, started_at: System.monotonic_time()}
   end
 
   defp arm_timeout(:infinity, _task), do: :ok
@@ -153,10 +179,10 @@ defmodule WardrikCore.Agent do
   end
 
   defp stop_turn(state, outcome) do
-    :telemetry.execute(
-      [:wardrik_core, :turn, :stop],
+    Telemetry.emit(
+      [:turn, :stop],
       %{duration: System.monotonic_time() - state.started_at},
-      %{agent_id: state.agent_id, outcome: outcome}
+      %{agent_id: state.agent_id, kind: state.turn_kind, outcome: outcome}
     )
   end
 
@@ -179,7 +205,7 @@ defmodule WardrikCore.Agent do
       | state: :waiting,
         task: nil,
         checkpoint: nil,
-        parked: %{reason: reason, messages: context.messages}
+        parked: %{reason: reason, messages: context.messages, metadata: context.metadata}
     }
   end
 

@@ -8,7 +8,8 @@ defmodule WardrikCore.Turn do
   @type checkpoint :: %{
           messages: [ReqLLM.Message.t()],
           calls: [ReqLLM.ToolCall.t()],
-          rounds: non_neg_integer()
+          rounds: non_neg_integer(),
+          metadata: map()
         }
 
   @spec run(Context.t()) :: WardrikCore.Middleware.result()
@@ -31,8 +32,12 @@ defmodule WardrikCore.Turn do
   Carries on a turn lost while its tools ran, from the checkpoint it saved.
   """
   @spec recover(Context.t(), checkpoint()) :: WardrikCore.Middleware.result()
-  def recover(%Context{} = context, %{messages: messages, calls: calls, rounds: rounds}) do
-    context = %{with_tools(context) | messages: messages}
+  def recover(
+        %Context{} = context,
+        %{messages: messages, calls: calls, rounds: rounds} = checkpoint
+      ) do
+    metadata = Map.merge(context.metadata, Map.get(checkpoint, :metadata, %{}))
+    context = %{with_tools(context) | messages: messages, metadata: metadata}
 
     Context.run(context, :turn, fn context ->
       continue(context, ToolRunner.run(context, calls), rounds)
@@ -96,7 +101,14 @@ defmodule WardrikCore.Turn do
   end
 
   defp run_tools(context, calls, rounds) do
-    :ok = save_checkpoint(context, %{messages: context.messages, calls: calls, rounds: rounds})
+    checkpoint = %{
+      messages: context.messages,
+      calls: calls,
+      rounds: rounds,
+      metadata: context.metadata
+    }
+
+    :ok = save_checkpoint(context, checkpoint)
     continue(context, ToolRunner.run(context, calls), rounds)
   end
 

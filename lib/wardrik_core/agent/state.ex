@@ -18,6 +18,7 @@ defmodule WardrikCore.Agent.State do
     :context,
     :task,
     :started_at,
+    :turn_kind,
     :parked,
     :checkpoint,
     state: :idle,

@@ -7,6 +7,19 @@ defmodule WardrikCore.AgentTest do
 
   alias WardrikCore.Test.Echo
 
+  defmodule Trace do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(%WardrikCore.Context{step: :turn} = context, next) do
+      trace = Map.get_lazy(context.metadata, :trace, fn -> System.unique_integer() end)
+      send(WardrikCore.AgentTest, {:trace, trace})
+      next.(put_in(context.metadata[:trace], trace))
+    end
+
+    def call(context, next), do: next.(context)
+  end
+
   defmodule Blocking do
     @behaviour WardrikCore.Capability
 
@@ -31,22 +44,33 @@ defmodule WardrikCore.AgentTest do
 
   setup do
     handler = "agent-test-#{System.unique_integer([:positive])}"
-    :telemetry.attach(handler, [:wardrik_core, :turn, :stop], &__MODULE__.turn_stopped/4, self())
+
+    events = [
+      [:wardrik_core, :agent, :start],
+      [:wardrik_core, :agent, :stop],
+      [:wardrik_core, :message, :queued],
+      [:wardrik_core, :turn, :start],
+      [:wardrik_core, :turn, :stop],
+      [:wardrik_core, :turn, :checkpoint],
+      [:wardrik_core, :turn, :dropped]
+    ]
+
+    :telemetry.attach_many(handler, events, &__MODULE__.handle_event/4, self())
     on_exit(fn -> :telemetry.detach(handler) end)
 
     stub(ReqLLM.StreamResponse, :process_stream, fn response, _opts -> {:ok, response} end)
     :ok
   end
 
-  def turn_stopped(_event, _measurements, metadata, test),
-    do: send(test, {:turn_stopped, metadata})
+  def handle_event([:wardrik_core | event], _measurements, metadata, test),
+    do: send(test, {event, metadata})
 
   test "a turn that crashes leaves the agent running and its message in history" do
     expect(ReqLLM, :stream_text, fn _, _, _ -> raise "boom" end)
     {id, agent} = start_agent()
 
     WardrikCore.ask(agent, "hi")
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :crash}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :crash}}
 
     assert %{state: :idle, in_flight: [], messages: [%{role: :user}]} = agent_state(agent)
   end
@@ -56,7 +80,7 @@ defmodule WardrikCore.AgentTest do
     {id, agent} = start_agent()
 
     WardrikCore.ask(agent, "hi")
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :error}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :error}}
 
     assert %{state: :idle, in_flight: [], messages: [%{role: :user}]} = agent_state(agent)
   end
@@ -80,7 +104,7 @@ defmodule WardrikCore.AgentTest do
     assert_receive {:DOWN, ^ref, :process, _pid, :killed}
 
     {^id, agent} = start_agent(agent_id: id)
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
     assert %{messages: messages} = agent_state(agent)
     assert [:user, :assistant] = Enum.map(messages, & &1.role)
@@ -99,15 +123,18 @@ defmodule WardrikCore.AgentTest do
     {id, agent} = start_agent(capabilities: [Blocking])
     WardrikCore.ask(agent, "hi")
     assert_receive {:tool_running, "call-a", _tool}
+    assert_receive {[:turn, :checkpoint], %{agent_id: ^id}}
 
     ref = Process.monitor(agent)
     Process.exit(agent, :kill)
     assert_receive {:DOWN, ^ref, :process, _pid, :killed}
 
     {^id, agent} = start_agent(agent_id: id, capabilities: [Blocking])
+    assert_receive {[:agent, :start], %{agent_id: ^id, state: :due}}
+    assert_receive {[:turn, :start], %{agent_id: ^id, kind: :recover}}
     assert_receive {:tool_running, "call-a", tool}
     send(tool, :release)
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
     assert %{state: :idle, checkpoint: nil, in_flight: [], messages: messages} =
              agent_state(agent)
@@ -134,8 +161,8 @@ defmodule WardrikCore.AgentTest do
 
       assert :ok = WardrikCore.interrupt(agent)
       assert_receive {:DOWN, ^tool_ref, :process, _pid, _reason}
-      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :interrupted}}
-      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :interrupted}}
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
       assert %{state: :idle, checkpoint: nil, messages: messages} = agent_state(agent)
       assert [:user, :user, :assistant] = Enum.map(messages, & &1.role)
@@ -146,9 +173,10 @@ defmodule WardrikCore.AgentTest do
 
       {id, agent} = start_agent(middleware: [ParkTools])
       WardrikCore.ask(agent, "hi")
-      assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :park}}
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
 
       assert :ok = WardrikCore.interrupt(agent)
+      assert_receive {[:turn, :dropped], %{agent_id: ^id}}
 
       assert %{state: :idle, parked: nil, messages: [%{role: :user}]} = agent_state(agent)
       assert {:error, :not_parked} = WardrikCore.resume(agent, %{"1" => :approve})
@@ -167,7 +195,7 @@ defmodule WardrikCore.AgentTest do
     {id, agent} = start_agent(timeout: 50)
     WardrikCore.ask(agent, "hi")
 
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :timeout}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :timeout}}
     assert %{state: :idle, messages: [%{role: :user}]} = agent_state(agent)
   end
 
@@ -188,8 +216,8 @@ defmodule WardrikCore.AgentTest do
     :ok = WardrikCore.ask(agent, "actually, second")
     send(tool, :release)
 
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
     assert [:user, :assistant, :tool, :user, :assistant] =
              agent |> WardrikCore.history() |> Enum.map(& &1.role)
@@ -216,10 +244,57 @@ defmodule WardrikCore.AgentTest do
     ref = Process.monitor(agent)
     assert :ok = WardrikCore.stop(agent)
     assert_receive {:DOWN, ^ref, :process, _pid, _reason}
+    assert_receive {[:agent, :stop], %{agent_id: ^id}}
 
     {^id, agent} = start_agent(agent_id: id)
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
     assert [:user, :assistant] = agent |> WardrikCore.history() |> Enum.map(& &1.role)
+  end
+
+  test "an ask, a park and a resume emit their lifecycle in order" do
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo")])} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent(middleware: [ParkTools])
+    assert_receive {[:agent, :start], %{agent_id: ^id, state: :idle}}
+
+    :ok = WardrikCore.ask(agent, "hi")
+    assert_receive {[:message, :queued], %{agent_id: ^id}}
+    assert_receive {[:turn, :start], %{agent_id: ^id, kind: :run}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :run, outcome: :park}}
+
+    :ok = WardrikCore.resume(agent, %{"1" => :approve})
+    assert_receive {[:turn, :start], %{agent_id: ^id, kind: :resume}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :resume, outcome: :ok}}
+  end
+
+  test "a turn keeps its metadata across a park and resume" do
+    Process.register(self(), WardrikCore.AgentTest)
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo")])} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent(middleware: [Trace, ParkTools])
+    :ok = WardrikCore.ask(agent, "hi")
+    assert_receive {:trace, trace}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
+
+    :ok = WardrikCore.resume(agent, %{"1" => :approve})
+    assert_receive {:trace, ^trace}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+  end
+
+  test "ask/3 metadata travels with the message" do
+    expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent()
+    :ok = WardrikCore.ask(agent, "hi", %{from: "jon"})
+
+    assert_receive {[:message, :queued], %{agent_id: ^id, message: %{metadata: %{from: "jon"}}}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+    assert [%{metadata: %{from: "jon"}}, _answer] = WardrikCore.history(agent)
   end
 
   test "an unknown cast is ignored" do
@@ -240,15 +315,15 @@ defmodule WardrikCore.AgentTest do
     assert {:error, :not_parked} = WardrikCore.resume(agent, %{"1" => :approve})
 
     WardrikCore.ask(agent, "hi")
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :park}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
     assert {:tool_calls, [{%{id: "1"}, {:park, :needs_approval}}]} = WardrikCore.parked(agent)
 
     assert :ok = WardrikCore.resume(agent, %{"nope" => :approve})
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :park}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
 
     assert :ok = WardrikCore.resume(agent, %{"1" => :approve})
 
-    assert_receive {:turn_stopped, %{agent_id: ^id, outcome: :ok}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
     assert %{state: :idle, parked: nil, in_flight: [], messages: messages} = agent_state(agent)
     assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)

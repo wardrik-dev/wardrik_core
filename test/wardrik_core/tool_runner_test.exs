@@ -65,6 +65,24 @@ defmodule WardrikCore.ToolRunnerTest do
     assert [{_, {:ok, "7"}}] = ToolRunner.run(context, [call("7", "whoami")])
   end
 
+  test "a call that times out emits a tool_call exit event", %{context: context} do
+    test = self()
+    agent_id = "tool-exit-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      agent_id,
+      [:wardrik_core, :tool_call, :exit],
+      fn _event, _measurements, metadata, _config -> send(test, {:tool_exit, metadata}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(agent_id) end)
+
+    ToolRunner.run(%{context | agent_id: agent_id}, [call("9", "slow")])
+
+    assert_receive {:tool_exit, %{agent_id: ^agent_id, call: %{id: "9"}, reason: :timeout}}
+  end
+
   test "a batch runs under its tools' declared timeout", %{context: context} do
     assert [{_, {:error, {:exit, :timeout}}}] = ToolRunner.run(context, [call("1", "slow")])
   end

@@ -28,8 +28,9 @@ defmodule WardrikCore do
   end
 
   @doc "Queues a message, returning once it is stored. A running turn yields to it."
-  @spec ask(GenServer.server(), String.t()) :: :ok
-  def ask(agent, text) when is_binary(text), do: GenServer.call(agent, {:ask, text})
+  @spec ask(GenServer.server(), String.t(), map()) :: :ok
+  def ask(agent, text, metadata \\ %{}) when is_binary(text) and is_map(metadata),
+    do: GenServer.call(agent, {:ask, text, metadata})
 
   @spec history(GenServer.server()) :: [ReqLLM.Message.t()]
   def history(agent), do: GenServer.call(agent, :history)

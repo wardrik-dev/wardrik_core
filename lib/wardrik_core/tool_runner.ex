@@ -4,6 +4,7 @@ defmodule WardrikCore.ToolRunner do
   """
   alias ReqLLM.ToolCall
   alias WardrikCore.Context
+  alias WardrikCore.Telemetry
   alias WardrikCore.Tool
 
   @timeout :timer.minutes(3)
@@ -29,7 +30,7 @@ defmodule WardrikCore.ToolRunner do
     )
     |> Enum.zip_with(calls, fn
       {:ok, outcome}, call -> {call, outcome}
-      {:exit, reason}, call -> {call, {:error, {:exit, reason}}}
+      {:exit, reason}, call -> {call, exited(context, call, reason)}
     end)
   end
 
@@ -50,6 +51,11 @@ defmodule WardrikCore.ToolRunner do
   catch
     :error, reason -> {:error, Exception.normalize(:error, reason, __STACKTRACE__)}
     kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp exited(context, call, reason) do
+    Telemetry.emit([:tool_call, :exit], %{agent_id: context.agent_id, call: call, reason: reason})
+    {:error, {:exit, reason}}
   end
 
   defp execute(%Context{step: {:tool_call, call}, tools: tools} = context),
