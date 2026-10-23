@@ -231,6 +231,26 @@ defmodule WardrikCore.AgentTest do
     end
   end
 
+  describe "nodes/1, placements/1 and move/3" do
+    test "say where each agent runs, and start one again where it's told" do
+      here = to_string(node())
+      {id, agent} = start_agent()
+
+      assert here in WardrikCore.nodes()
+      assert %{^id => ^here} = WardrikCore.placements()
+
+      assert {:ok, moved} = WardrikCore.move(id, here)
+      refute moved == agent
+      assert %{agent_id: ^id, state: :idle} = agent_state(moved)
+
+      assert {:error, :no_such_node} = WardrikCore.move(id, "nowhere@nohost")
+      assert {:error, :not_found} = WardrikCore.move("agent-never", here)
+
+      :ok = WardrikCore.stop(moved)
+      assert %{^id => nil} = WardrikCore.placements()
+    end
+  end
+
   describe "delete/2" do
     test "stops an agent and forgets it" do
       {id, agent} = start_agent()

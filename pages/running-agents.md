@@ -93,3 +93,5 @@ call's id `:approve` to run it again, or `{:deny, reason}` to tell the model why
 | `stop/1` | Stops the agent until it is started again |
 | `delete/2` | Stops the agent and deletes everything saved of it |
 | `list/1`, `whereis/2` | Every saved agent's id, and the running agent for an id |
+| `nodes/1`, `placements/1` | The cluster's nodes, and the node each saved agent runs on |
+| `move/3` | Starts an agent again on another node, as it was |

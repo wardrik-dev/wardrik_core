@@ -121,6 +121,42 @@ defmodule WardrikCore do
   @spec stop(GenServer.server()) :: :ok
   def stop(agent), do: GenServer.call(agent, :stop)
 
+  @doc "Returns the nodes of the cluster agents run on, by name."
+  @spec nodes(atom()) :: [String.t()]
+  def nodes(instance \\ __MODULE__) do
+    instance
+    |> agents()
+    |> DurableServer.Supervisor.get_cluster_nodes()
+    |> Map.keys()
+    |> Enum.sort()
+  end
+
+  @doc "Returns every saved agent's id, with the node it runs on, or `nil` while it isn't running."
+  @spec placements(atom()) :: %{String.t() => String.t() | nil}
+  def placements(instance \\ __MODULE__) do
+    instance
+    |> agents()
+    |> DurableServer.Supervisor.stream_all_server_info()
+    |> Map.new(fn info -> {info.key, placed(info)} end)
+  end
+
+  @doc """
+  Starts the agent again on the node `node`, as it was. A turn it's taking ends, and what it waits
+  on is abandoned.
+  """
+  @spec move(atom(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
+  def move(instance \\ __MODULE__, agent_id, node) do
+    with {:ok, target} <- node(node, nodes(instance)),
+         :ok <- saved(instance, agent_id) do
+      child = {WardrikCore.Agent, key: agent_id, initial_state: %{}}
+
+      case DurableServer.Supervisor.rehome_child(agents(instance), child, target_node: target) do
+        {:ok, {pid, _meta}} -> {:ok, pid}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   @doc "Stops the agent and deletes everything saved of it. Deleting an agent there isn't is `:ok`."
   @spec delete(atom(), String.t()) :: :ok | {:error, term()}
   def delete(instance \\ __MODULE__, agent_id) do
@@ -173,6 +209,19 @@ defmodule WardrikCore do
     with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
       {:ok, response.object, WardrikCore.Usage.measurements(response, model)}
     end
+  end
+
+  defp placed(%{running: true, node: node}), do: to_string(node)
+  defp placed(_info), do: nil
+
+  defp node(node, nodes) do
+    if node in nodes,
+      do: {:ok, String.to_existing_atom(node)},
+      else: {:error, :no_such_node}
+  end
+
+  defp saved(instance, agent_id) do
+    if agent_id in list(instance), do: :ok, else: {:error, :not_found}
   end
 
   defp agents(instance), do: Module.concat(instance, Agents)
