@@ -103,6 +103,8 @@ defmodule WardrikCore do
 
   Put the `WardrikCore.Principal` who asked in `metadata` as `:principal`, and the turn that answers
   acts on their behalf. A turn answers the messages in a row from one principal, never two.
+
+  Each message gets an `:id` in its metadata, unless you gave one.
   """
   @spec ask(GenServer.server(), String.t(), map()) :: :ok
   def ask(agent, text, metadata \\ %{}) when is_binary(text) and is_map(metadata),

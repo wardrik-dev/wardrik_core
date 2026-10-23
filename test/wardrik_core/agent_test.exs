@@ -122,7 +122,9 @@ defmodule WardrikCore.AgentTest do
     assert_receive {:DOWN, ^ref, :process, _pid, :killed}
 
     {^id, agent} = start_agent(agent_id: id)
-    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+
+    assert_receive {[:turn, :stop],
+                    %{agent_id: ^id, outcome: :ok, messages: [%{role: :assistant}]}}
 
     assert %{messages: messages} = agent_state(agent)
     assert [:user, :assistant] = Enum.map(messages, & &1.role)
@@ -160,6 +162,20 @@ defmodule WardrikCore.AgentTest do
     assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
   end
 
+  test "gives each message an id, keeping one it was given" do
+    ReqLLM
+    |> stub(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    {id, agent} = start_agent()
+    WardrikCore.ask(agent, "hi")
+
+    assert_receive {[:message, :queued],
+                    %{agent_id: ^id, message: %{metadata: %{id: "msg_" <> _random}}}}
+
+    WardrikCore.ask(agent, "again", %{id: "mine"})
+    assert_receive {[:message, :queued], %{agent_id: ^id, message: %{metadata: %{id: "mine"}}}}
+  end
+
   describe "interrupt/1" do
     test "stops a running turn and its tools, then runs what was queued behind it" do
       Process.register(self(), WardrikCore.AgentTest)
@@ -179,7 +195,10 @@ defmodule WardrikCore.AgentTest do
 
       assert :ok = WardrikCore.interrupt(agent)
       assert_receive {:DOWN, ^tool_ref, :process, _pid, _reason}
-      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :interrupted}}
+
+      assert_receive {[:turn, :stop],
+                      %{agent_id: ^id, outcome: :interrupted, kept: 1, dropped: 0}}
+
       assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
 
       assert %{state: :idle, checkpoint: nil, messages: messages} = agent_state(agent)
@@ -265,7 +284,10 @@ defmodule WardrikCore.AgentTest do
     assert_receive {[:agent, :stop], %{agent_id: ^id}}
 
     {^id, agent} = start_agent(agent_id: id)
-    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+
+    assert_receive {[:turn, :stop],
+                    %{agent_id: ^id, outcome: :ok, messages: [%{role: :assistant}]}}
+
     assert [:user, :assistant] = agent |> WardrikCore.history() |> Enum.map(& &1.role)
   end
 

@@ -32,7 +32,7 @@ defmodule WardrikCore.Agent do
   @impl true
   def handle_call({:ask, text, metadata}, _from, %State{} = state) do
     if state.state == :running, do: Turn.yield(state.task.pid)
-    message = ReqLLM.Context.user(text, metadata)
+    message = ReqLLM.Context.user(text, Map.put_new_lazy(metadata, :id, &message_id/0))
     state = State.queue(state, message)
 
     emit(state, [:message, :queued], %{queued: length(state.pending_messages)}, %{
@@ -172,7 +172,7 @@ defmodule WardrikCore.Agent do
         finish(state, result)
 
       _stopped ->
-        stop_turn(state, %{outcome: outcome})
+        stop_turn(state, %{outcome: outcome, kept: length(state.in_flight), dropped: 0})
         State.unanswered(state)
     end
   end
@@ -184,7 +184,18 @@ defmodule WardrikCore.Agent do
   end
 
   defp ended({:park, reason, _context}), do: %{outcome: :park, reason: reason}
+  defp ended({:ok, context}), do: %{outcome: :ok, messages: answer(context.messages)}
   defp ended(result), do: %{outcome: elem(result, 0)}
+
+  defp answer(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.take_while(fn message -> message.role != :user end)
+    |> Enum.reverse()
+  end
+
+  defp message_id,
+    do: "msg_" <> (12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
   defp log_ended(state, {:park, reason, _context}),
     do: Logger.info("Turn parked for agent #{state.agent_id}: #{inspect(reason)}")
