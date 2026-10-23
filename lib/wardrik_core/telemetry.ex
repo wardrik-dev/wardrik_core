@@ -7,7 +7,8 @@ defmodule WardrikCore.Telemetry do
     * `[:wardrik_core, :agent, :stop]` - `reason`
     * `[:wardrik_core, :message, :queued]` - `message`, whose metadata holds its `id`; measures
       `queued`
-    * `[:wardrik_core, :turn, :start]` - `kind`, `span`, and the `metadata` given to `resume/3`
+    * `[:wardrik_core, :turn, :start]` - `kind`, `span`, the `message_ids` a run answers, and the
+      `metadata` given to `resume/3`
     * `[:wardrik_core, :turn, :stop]` - `kind`, `span`, `outcome`, the `messages` an answered turn
       added, the `reason` a parked turn gives `parked/1` or a failed one failed with, and how many messages an interrupted or
       timed-out turn `kept` and `dropped`; measures `duration`

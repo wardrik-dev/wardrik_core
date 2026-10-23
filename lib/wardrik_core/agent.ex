@@ -60,7 +60,9 @@ defmodule WardrikCore.Agent do
     }
 
     {:reply, :ok,
-     start_turn(state, :resume, context, metadata, fn -> Turn.resume(context, resume) end)}
+     start_turn(state, :resume, context, %{metadata: metadata}, fn ->
+       Turn.resume(context, resume)
+     end)}
   end
 
   def handle_call({:resume, _input, _metadata}, _from, state),
@@ -103,7 +105,8 @@ defmodule WardrikCore.Agent do
   def handle_continue(:maybe_run, %State{state: :idle, pending_messages: [_ | _]} = state) do
     {batch, state} = State.take_batch(state)
     context = turn_context(state, state.messages ++ batch, Span.root())
-    {:noreply, start_turn(state, :run, context, fn -> Turn.run(context) end)}
+    started = %{message_ids: for(%{metadata: %{id: id}} <- batch, do: id)}
+    {:noreply, start_turn(state, :run, context, started, fn -> Turn.run(context) end)}
   end
 
   def handle_continue(:maybe_run, state), do: {:noreply, state}
@@ -154,8 +157,8 @@ defmodule WardrikCore.Agent do
     }
   end
 
-  defp start_turn(state, kind, context, metadata \\ %{}, fun) do
-    started = %{span: context.span, kind: kind, metadata: metadata}
+  defp start_turn(state, kind, context, started \\ %{}, fun) do
+    started = Map.merge(started, %{span: context.span, kind: kind})
     emit(state, [:turn, :start], %{system_time: System.system_time()}, started)
 
     task = Task.async(fun)
