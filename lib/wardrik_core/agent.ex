@@ -84,7 +84,7 @@ defmodule WardrikCore.Agent do
     do: {:reply, :ok, stop_running(state, :interrupted), {:continue, :maybe_run}, sync: true}
 
   def handle_call(:interrupt, _from, %State{state: :waiting} = state) do
-    emit(state, [:turn, :dropped], %{}, %{})
+    stop_turn(state, %{outcome: :interrupted, kept: length(state.in_flight), dropped: 0})
     {:reply, :ok, State.unanswered(state), {:continue, :maybe_run}, sync: true}
   end
 

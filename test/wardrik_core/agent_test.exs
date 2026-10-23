@@ -69,7 +69,6 @@ defmodule WardrikCore.AgentTest do
       [:wardrik_core, :turn, :start],
       [:wardrik_core, :turn, :stop],
       [:wardrik_core, :turn, :checkpoint],
-      [:wardrik_core, :turn, :dropped],
       [:wardrik_core, :step, :stop]
     ]
 
@@ -213,7 +212,9 @@ defmodule WardrikCore.AgentTest do
       assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
 
       assert :ok = WardrikCore.interrupt(agent)
-      assert_receive {[:turn, :dropped], %{agent_id: ^id}}
+
+      assert_receive {[:turn, :stop],
+                      %{agent_id: ^id, outcome: :interrupted, kept: 1, dropped: 0}}
 
       assert %{state: :idle, parked: nil, messages: [%{role: :user}]} = agent_state(agent)
       assert {:error, :not_parked} = WardrikCore.resume(agent, %{"1" => :approve})

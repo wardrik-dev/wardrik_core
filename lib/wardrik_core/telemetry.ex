@@ -13,7 +13,6 @@ defmodule WardrikCore.Telemetry do
       added, the `reason` a parked turn gives `parked/1` or a failed one failed with, and how many messages an interrupted or
       timed-out turn `kept` and `dropped`; measures `duration`
     * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
-    * `[:wardrik_core, :turn, :dropped]`
     * `[:wardrik_core, :message, :delta]` - `span`, `kind` (`:content` or `:thinking`), and the
       `text` the model streamed
     * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`
