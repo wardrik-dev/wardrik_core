@@ -60,8 +60,12 @@ defmodule WardrikCore.SpanTest do
     assert {:ok, _context} = Turn.run(context)
 
     assert_receive {:start, _, %{step: :turn, span: %Span{} = turn}}
-    assert_receive {:start, _, %{step: :generate, span: generate}}
-    assert_receive {:start, _, %{step: {:tool_call, %{id: "1"}}, span: tool_call}}
+
+    assert_receive {:start, _,
+                    %{step: :generate, span: generate, model: "anthropic:claude-haiku-4-5"}}
+
+    assert_receive {:start, _, %{step: {:tool_call, %{id: "1"}}, span: tool_call} = started}
+    refute Map.has_key?(started, :model)
 
     assert turn.parent == context.span.id
     assert generate.parent == turn.id

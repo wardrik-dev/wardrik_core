@@ -185,6 +185,7 @@ defmodule WardrikCore.Agent do
 
   defp ended({:park, reason, _context}), do: %{outcome: :park, reason: reason}
   defp ended({:ok, context}), do: %{outcome: :ok, messages: answer(context.messages)}
+  defp ended({:error, reason}), do: %{outcome: :error, reason: reason}
   defp ended(result), do: %{outcome: elem(result, 0)}
 
   defp answer(messages) do

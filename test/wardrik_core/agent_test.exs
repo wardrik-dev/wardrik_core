@@ -98,7 +98,7 @@ defmodule WardrikCore.AgentTest do
     {id, agent} = start_agent()
 
     WardrikCore.ask(agent, "hi")
-    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :error}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :error, reason: _reason}}
 
     assert %{state: :idle, in_flight: [], messages: [%{role: :user}]} = agent_state(agent)
   end

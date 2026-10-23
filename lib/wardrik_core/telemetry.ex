@@ -9,14 +9,14 @@ defmodule WardrikCore.Telemetry do
       `queued`
     * `[:wardrik_core, :turn, :start]` - `kind`, `span`, and the `metadata` given to `resume/3`
     * `[:wardrik_core, :turn, :stop]` - `kind`, `span`, `outcome`, the `messages` an answered turn
-      added, the `reason` a parked turn gives `parked/1`, and how many messages an interrupted or
+      added, the `reason` a parked turn gives `parked/1` or a failed one failed with, and how many messages an interrupted or
       timed-out turn `kept` and `dropped`; measures `duration`
     * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
     * `[:wardrik_core, :turn, :dropped]`
     * `[:wardrik_core, :message, :delta]` - `span`, `kind` (`:content` or `:thinking`), and the
       `text` the model streamed
     * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`
-    * `[:wardrik_core, :step, :start]` - `step`, `span`
+    * `[:wardrik_core, :step, :start]` - `step`, `span`, and the `model` a `:generate` step calls
     * `[:wardrik_core, :step, :stop]` - `step`, `span`, `status`, `attributes`, and the `response`
       or `reason`; measures `duration` and what the step measured
     * `[:wardrik_core, :step, :exception]` - `step`, `span`, `kind`, `reason`, `stacktrace`
@@ -34,7 +34,7 @@ defmodule WardrikCore.Telemetry do
           WardrikCore.Middleware.result()
   def span(%Context{} = context, step, fun) do
     inner = %{context | step: step, span: child(context, step), attributes: principals(context)}
-    start = %{agent_id: inner.agent_id, span: inner.span, step: step}
+    start = started(inner, step)
 
     began = System.monotonic_time()
 
@@ -65,6 +65,11 @@ defmodule WardrikCore.Telemetry do
         :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
+
+  defp started(context, :generate),
+    do: %{agent_id: context.agent_id, span: context.span, step: :generate, model: context.model}
+
+  defp started(context, step), do: %{agent_id: context.agent_id, span: context.span, step: step}
 
   defp principals(context) do
     %{}
