@@ -193,10 +193,15 @@ defmodule WardrikCore.Turn do
 
   defp streamed(_context, _chunk), do: :ok
 
+  defp prompt(%Context{instructions: nil, messages: messages}), do: messages
+
+  defp prompt(%Context{instructions: instructions, messages: messages}),
+    do: [ReqLLM.Context.system(instructions) | messages]
+
   defp generate(%Context{} = context) do
     tools = Enum.map(context.tools, fn tool -> tool.req_llm end)
 
-    with {:ok, streamed} <- ReqLLM.stream_text(context.model, context.messages, tools: tools),
+    with {:ok, streamed} <- ReqLLM.stream_text(context.model, prompt(context), tools: tools),
          {:ok, response} <-
            ReqLLM.StreamResponse.process_stream(streamed, on_chunk: &dispatch(context, &1)) do
       context =

@@ -69,6 +69,7 @@ call's id `:approve` to run it again, or `{:deny, reason}` to tell the model why
 
 | Option | Takes | Unless set |
 | --- | --- | --- |
+| `instructions` | the system prompt, sent with every model call and never kept in the conversation | none |
 | `capabilities` | the modules that hand the agent its tools; see [Tools](tools.md) | none |
 | `middleware` | what wraps every call; see [Middleware](middleware.md) | none |
 | `principal` | who the agent acts as; see [Principals](principals.md) | none |

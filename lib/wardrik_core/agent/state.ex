@@ -30,6 +30,7 @@ defmodule WardrikCore.Agent.State do
     :checkpoint
   ]
   @persisted_context [
+    :instructions,
     :capabilities,
     :middleware,
     :max_rounds,

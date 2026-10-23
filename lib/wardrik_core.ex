@@ -43,6 +43,7 @@ defmodule WardrikCore do
   end
 
   @config [
+    :instructions,
     :capabilities,
     :middleware,
     :timeout,

@@ -175,6 +175,30 @@ defmodule WardrikCore.AgentTest do
     assert_receive {[:message, :queued], %{agent_id: ^id, message: %{metadata: %{id: "mine"}}}}
   end
 
+  describe "instructions" do
+    test "are the system prompt of every model call, and never part of the conversation" do
+      ReqLLM
+      |> expect(:stream_text, fn _, [system, %{role: :user}], _ ->
+        assert %{role: :system, content: [%{text: "Be brief."}]} = system
+        {:ok, answer("Hi.")}
+      end)
+      |> expect(:stream_text, fn _, [system | _messages], _ ->
+        assert %{role: :system, content: [%{text: "Be kind."}]} = system
+        {:ok, answer("Hello.")}
+      end)
+
+      {id, agent} = start_agent(instructions: "Be brief.")
+      WardrikCore.ask(agent, "hi")
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+
+      assert [:user, :assistant] = agent |> WardrikCore.history() |> Enum.map(& &1.role)
+
+      :ok = WardrikCore.configure(agent, instructions: "Be kind.")
+      WardrikCore.ask(agent, "hello")
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+    end
+  end
+
   describe "kill/2" do
     test "stops one running call, and the turn goes on without it" do
       Process.register(self(), WardrikCore.AgentTest)
