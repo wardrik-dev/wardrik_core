@@ -85,8 +85,10 @@ call's id `:approve` to run it again, or `{:deny, reason}` to tell the model why
 | --- | --- |
 | `ask/3` | Queues a message; a running turn ends at its next step and the next turn answers it |
 | `interrupt/1` | Stops the running or parked turn |
+| `kill/2` | Stops one running tool call; the model is answered with an error, and the turn goes on |
 | `resume/3` | Re-enters a parked turn, with who answered as its metadata |
 | `status/1`, `history/1`, `parked/1` | What the agent is doing, has said, and waits on |
 | `configure/2` | Replaces the model or settings, from the next turn |
 | `stop/1` | Stops the agent until it is started again |
+| `delete/2` | Stops the agent and deletes everything saved of it |
 | `list/1`, `whereis/2` | Every saved agent's id, and the running agent for an id |

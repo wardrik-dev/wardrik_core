@@ -175,6 +175,51 @@ defmodule WardrikCore.AgentTest do
     assert_receive {[:message, :queued], %{agent_id: ^id, message: %{metadata: %{id: "mine"}}}}
   end
 
+  describe "kill/2" do
+    test "stops one running call, and the turn goes on without it" do
+      Process.register(self(), WardrikCore.AgentTest)
+
+      ReqLLM
+      |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("call-a", "block")])} end)
+      |> expect(:stream_text, fn _, messages, _ ->
+        assert %{role: :tool} = tool_result = List.last(messages)
+        assert [%{text: text}] = tool_result.content
+        assert text =~ "The call was stopped before it finished."
+        {:ok, answer("done")}
+      end)
+
+      {id, agent} = start_agent(capabilities: [Blocking])
+      WardrikCore.ask(agent, "first")
+      assert_receive {:tool_running, "call-a", tool}
+      tool_ref = Process.monitor(tool)
+
+      assert :ok = WardrikCore.kill(agent, "call-a")
+      assert_receive {:DOWN, ^tool_ref, :process, _pid, :killed}
+      assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :ok}}
+
+      assert {:error, :not_running} = WardrikCore.kill(agent, "call-a")
+    end
+
+    test "has nothing to stop on a call it isn't running" do
+      {_id, agent} = start_agent()
+
+      assert {:error, :not_running} = WardrikCore.kill(agent, "call-9")
+    end
+  end
+
+  describe "delete/2" do
+    test "stops an agent and forgets it" do
+      {id, agent} = start_agent()
+      ref = Process.monitor(agent)
+
+      assert :ok = WardrikCore.delete(id)
+      assert_receive {:DOWN, ^ref, :process, _pid, _reason}
+
+      refute id in WardrikCore.list()
+      assert :ok = WardrikCore.delete(id)
+    end
+  end
+
   describe "interrupt/1" do
     test "stops a running turn and its tools, then runs what was queued behind it" do
       Process.register(self(), WardrikCore.AgentTest)

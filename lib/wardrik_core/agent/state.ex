@@ -17,7 +17,8 @@ defmodule WardrikCore.Agent.State do
     state: :idle,
     messages: [],
     pending_messages: [],
-    in_flight: []
+    in_flight: [],
+    calls: %{}
   ]
 
   @persisted [
@@ -87,6 +88,7 @@ defmodule WardrikCore.Agent.State do
       state
       | state: :running,
         task: task,
+        calls: %{},
         turn_kind: kind,
         span: span,
         started_at: System.monotonic_time()

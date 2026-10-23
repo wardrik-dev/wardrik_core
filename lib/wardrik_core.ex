@@ -120,6 +120,23 @@ defmodule WardrikCore do
   @spec stop(GenServer.server()) :: :ok
   def stop(agent), do: GenServer.call(agent, :stop)
 
+  @doc "Stops the agent and deletes everything saved of it. Deleting an agent there isn't is `:ok`."
+  @spec delete(atom(), String.t()) :: :ok | {:error, term()}
+  def delete(instance \\ __MODULE__, agent_id) do
+    case DurableServer.Supervisor.terminate_and_delete_child(agents(instance), agent_id) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Stops the tool call `call_id` the agent is running. The model is answered with an error for it,
+  and the turn goes on.
+  """
+  @spec kill(GenServer.server(), String.t()) :: :ok | {:error, :not_running}
+  def kill(agent, call_id) when is_binary(call_id), do: GenServer.call(agent, {:kill, call_id})
+
   @doc "Stops the turn that's running or parked."
   @spec interrupt(GenServer.server()) :: :ok | {:error, :idle}
   def interrupt(agent), do: GenServer.call(agent, :interrupt)

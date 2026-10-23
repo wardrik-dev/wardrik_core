@@ -90,6 +90,13 @@ defmodule WardrikCore.Agent do
 
   def handle_call(:interrupt, _from, state), do: {:reply, {:error, :idle}, state}
 
+  def handle_call({:kill, call_id}, _from, %State{calls: calls} = state) do
+    case Map.fetch(calls, call_id) do
+      {:ok, pid} -> {:reply, kill_call(pid), state}
+      :error -> {:reply, {:error, :not_running}, state}
+    end
+  end
+
   @impl true
   def handle_cast(request, state) do
     Logger.warning("Agent #{state.agent_id} ignored an unknown cast: #{inspect(request)}")
@@ -130,6 +137,11 @@ defmodule WardrikCore.Agent do
 
   def handle_info({:turn_timeout, _ref}, state), do: {:noreply, state}
 
+  def handle_info({:call_started, call_id, pid}, %State{state: :running} = state),
+    do: {:noreply, %{state | calls: Map.put(state.calls, call_id, pid)}}
+
+  def handle_info({:call_started, _call_id, _pid}, state), do: {:noreply, state}
+
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
 
   def handle_info(message, state) do
@@ -153,6 +165,10 @@ defmodule WardrikCore.Agent do
         span: span,
         checkpoint: fn checkpoint ->
           GenServer.call(agent, {:checkpoint, checkpoint}, :timer.seconds(30))
+        end,
+        call_started: fn call_id ->
+          send(agent, {:call_started, call_id, self()})
+          :ok
         end
     }
   end
@@ -164,6 +180,15 @@ defmodule WardrikCore.Agent do
     task = Task.async(fun)
     arm_timeout(state.context.timeout, task)
     State.running(state, task, kind, context.span)
+  end
+
+  defp kill_call(pid) do
+    if Process.alive?(pid) do
+      Process.exit(pid, :kill)
+      :ok
+    else
+      {:error, :not_running}
+    end
   end
 
   defp arm_timeout(:infinity, _task), do: :ok

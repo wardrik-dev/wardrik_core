@@ -28,20 +28,32 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp run_each(context, calls, opts) do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+
+    try do
+      supervisor
+      |> stream(context, calls, opts)
+      |> Enum.zip_with(calls, fn
+        {:ok, {outcome, measured}}, call -> {call, outcome, measured}
+        {:exit, reason}, call -> {call, exited(context, call, reason), %{}}
+      end)
+    after
+      Supervisor.stop(supervisor)
+    end
+  end
+
+  defp stream(supervisor, context, calls, opts) do
     resume = Keyword.get(opts, :resume, %{})
 
-    calls
-    |> Task.async_stream(
+    Task.Supervisor.async_stream_nolink(
+      supervisor,
+      calls,
       &call(%{context | resume: Map.get(resume, &1.id)}, &1),
       ordered: true,
       max_concurrency: Keyword.get(opts, :max_concurrency, @max_concurrency),
       timeout: Keyword.get_lazy(opts, :timeout, fn -> timeout(context.tools, calls) end),
       on_timeout: :kill_task
     )
-    |> Enum.zip_with(calls, fn
-      {:ok, {outcome, measured}}, call -> {call, outcome, measured}
-      {:exit, reason}, call -> {call, exited(context, call, reason), %{}}
-    end)
   end
 
   @doc "The tool result messages for a batch's answered calls, in order."
@@ -53,6 +65,8 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp call(context, tool_call) do
+    started(context, tool_call)
+
     case Context.run(context, {:tool_call, tool_call}, &execute/1) do
       {:ok, %Context{response: outcome, measurements: measured}} -> {outcome, measured}
       {:error, reason} -> {{:error, reason}, %{}}
@@ -62,6 +76,9 @@ defmodule WardrikCore.ToolRunner do
     :error, reason -> {{:error, Exception.normalize(:error, reason, __STACKTRACE__)}, %{}}
     kind, reason -> {{:error, {kind, reason}}, %{}}
   end
+
+  defp started(%Context{call_started: nil}, _call), do: :ok
+  defp started(%Context{call_started: started}, call), do: started.(call.id)
 
   defp exited(context, call, reason) do
     Event.emit(context, [:wardrik_core, :tool_call, :exit], %{
@@ -98,6 +115,7 @@ defmodule WardrikCore.ToolRunner do
   defp answer(:error, reason), do: %{error: message(reason)}
 
   defp message(reason) when is_binary(reason), do: reason
+  defp message({:exit, :killed}), do: "The call was stopped before it finished."
   defp message(%{__exception__: true} = error), do: Exception.message(error)
   defp message(%{error: error}) when is_binary(error), do: error
 
