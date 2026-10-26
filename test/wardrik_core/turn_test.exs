@@ -130,6 +130,53 @@ defmodule WardrikCore.TurnTest do
     assert [:user, :assistant, :tool, :assistant] = Enum.map(messages, & &1.role)
   end
 
+  defmodule Labelled do
+    @behaviour WardrikCore.Capability
+
+    @impl true
+    def tools(_context, _opts) do
+      [
+        WardrikCore.Tool.new!(
+          name: "search",
+          description: "Searches the web",
+          run: fn _args, _context -> {:ok, "a page"} end,
+          annotations: [labels: ["outside"]]
+        ),
+        WardrikCore.Tool.new!(
+          name: "read",
+          description: "Reads a file",
+          run: fn _args, _context ->
+            {:ok, %ReqLLM.ToolResult{output: "a note", metadata: %{labels: ["books"]}}}
+          end
+        ),
+        WardrikCore.Tool.new!(
+          name: "fail",
+          description: "Fails",
+          run: fn _args, _context ->
+            {:error, %ReqLLM.ToolResult{output: "a stranger's error", metadata: %{labels: ["x"]}}}
+          end,
+          annotations: [labels: ["outside"]]
+        )
+      ]
+    end
+  end
+
+  test "a call's answer carries its tool's labels, and those it answers with, into the history",
+       %{context: context} do
+    calls = [call("1", "search"), call("2", "read"), call("3", "fail"), call("4", "echo")]
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling(calls)} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    assert {:ok, %Context{messages: messages} = done} =
+             Turn.run(%{context | capabilities: [Echo, Labelled]})
+
+    labels = for %{role: :tool} = message <- messages, do: message.metadata[:labels]
+    assert labels == [["outside"], ["books"], ["x", "outside"], nil]
+    assert Context.labels(done) == ["books", "outside", "x"]
+  end
+
   test "stops after max_rounds of tool use", %{context: context} do
     stub(ReqLLM, :stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo")])} end)
 

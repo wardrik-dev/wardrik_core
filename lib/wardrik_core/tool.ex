@@ -12,6 +12,12 @@ defmodule WardrikCore.Tool do
 
   A call that failed after paying answers `{:error, reason, context}`. See `WardrikCore.Context`.
 
+  An answer that holds what a label names, such as `"outside"` for text nobody on the agent's side
+  wrote, says so in its metadata, and its run carries the label from then on; see
+  `WardrikCore.Context.labels/1`:
+
+      {:ok, %ReqLLM.ToolResult{output: page, metadata: %{labels: ["outside"]}}}
+
   Annotations are facts about a tool that any package can read. Give them as `annotations:`, or
   with `annotate/2`:
 
@@ -24,6 +30,7 @@ defmodule WardrikCore.Tool do
     * `:timeout`, how long a call may take, in milliseconds.
     * `:resources`, what a call acts on, as a function of its arguments, like
       `fn args -> [args["path"]] end`.
+    * `:labels`, what every answer holds, as `["outside"]` for a web search.
 
   The first four are MCP's tool annotations. A tool that doesn't say has none of them.
   """

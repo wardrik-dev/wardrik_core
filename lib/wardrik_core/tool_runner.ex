@@ -56,12 +56,28 @@ defmodule WardrikCore.ToolRunner do
     )
   end
 
-  @doc "The tool result messages for a batch's answered calls, in order."
-  @spec messages([{ToolCall.t(), outcome()}]) :: [ReqLLM.Message.t()]
-  def messages(results) do
+  @doc "The tool result messages for a batch's answered calls, in order, each with its labels."
+  @spec messages([{ToolCall.t(), outcome()}], [Tool.t()]) :: [ReqLLM.Message.t()]
+  def messages(results, tools) do
     for {call, {tag, output}} <- results, tag in [:ok, :error] do
-      ReqLLM.Context.tool_result(call.id, call.name, answer(tag, output))
+      call.id
+      |> ReqLLM.Context.tool_result(call.name, answer(tag, output))
+      |> labelled(annotated(tools, call))
     end
+  end
+
+  defp annotated(tools, call) do
+    case Enum.find(tools, &(&1.name == call.name)) do
+      nil -> []
+      tool -> Tool.annotation(tool, :labels, [])
+    end
+  end
+
+  defp labelled(message, []), do: message
+
+  defp labelled(%ReqLLM.Message{metadata: metadata} = message, labels) do
+    held = Map.get(metadata, :labels, [])
+    %{message | metadata: Map.put(metadata, :labels, Enum.uniq(held ++ labels))}
   end
 
   defp call(context, tool_call) do
@@ -112,6 +128,10 @@ defmodule WardrikCore.ToolRunner do
   end
 
   defp answer(:ok, output), do: output
+
+  defp answer(:error, %ReqLLM.ToolResult{output: reason} = result),
+    do: %{result | output: %{error: message(reason)}}
+
   defp answer(:error, reason), do: %{error: message(reason)}
 
   defp message(reason) when is_binary(reason), do: reason

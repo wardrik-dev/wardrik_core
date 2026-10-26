@@ -123,7 +123,7 @@ defmodule WardrikCore.ToolRunnerTest do
   test "a tool that raises is answered with its message", %{context: context} do
     results = run(context, [call("1", "raise")])
 
-    assert [%{content: [%{text: text}]}] = ToolRunner.messages(results)
+    assert [%{content: [%{text: text}]}] = ToolRunner.messages(results, [])
     assert text =~ "kaput"
   end
 
@@ -149,7 +149,7 @@ defmodule WardrikCore.ToolRunnerTest do
              run(%{context | middleware: [Park]}, calls)
   end
 
-  test "messages/1 answers every call but parked ones" do
+  test "messages/2 answers every call but parked ones" do
     results = [
       {call("1", "echo"), {:ok, "a"}},
       {call("2", "echo"), {:error, "not allowed"}},
@@ -157,7 +157,7 @@ defmodule WardrikCore.ToolRunnerTest do
     ]
 
     assert [%{role: :tool, tool_call_id: "1"}, %{role: :tool, tool_call_id: "2"}] =
-             ToolRunner.messages(results)
+             ToolRunner.messages(results, [])
   end
 
   test "a tool reports on its step through the context, even when it fails", %{context: context} do

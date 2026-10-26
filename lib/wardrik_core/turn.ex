@@ -159,7 +159,7 @@ defmodule WardrikCore.Turn do
       {:park, {:tool_calls, results}, context}
     else
       context
-      |> append_messages(ToolRunner.messages(results))
+      |> append_messages(ToolRunner.messages(results, context.tools))
       |> loop(rounds - 1)
     end
   end

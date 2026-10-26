@@ -117,6 +117,21 @@ defmodule WardrikCore.Context do
   defp asked_by(%{metadata: %{principal: %WardrikCore.Principal{} = asked}}, _agent), do: asked
   defp asked_by(_message, agent), do: agent
 
+  @doc """
+  Gives the labels of what the turn has read: each one its messages hold in their metadata, once,
+  in order. A label stays with the history it came in, until the history is cleared.
+
+  Core carries labels and decides nothing from them. `"outside"` is content nobody on the agent's
+  side wrote, such as a web page or an issue a stranger filed: it may be what asks for the next
+  call.
+  """
+  @spec labels(t()) :: [String.t()]
+  def labels(%__MODULE__{messages: messages}),
+    do: messages |> Enum.flat_map(&message_labels/1) |> Enum.uniq() |> Enum.sort()
+
+  defp message_labels(%{metadata: %{labels: labels}}), do: labels
+  defp message_labels(_message), do: []
+
   @doc "Finds the tool a call names, or returns `nil`."
   @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil
   def tool(%__MODULE__{tools: tools}, %WardrikCore.ToolCall{name: name}),

@@ -103,4 +103,20 @@ defmodule WardrikCore.ContextTest do
       assert nil == Context.acting_for(Context.new(messages: []))
     end
   end
+
+  describe "labels/1" do
+    test "is each label the messages hold, once, in order" do
+      messages = [
+        ReqLLM.Context.user("hi", %{labels: ["outside"]}),
+        ReqLLM.Context.assistant("on it"),
+        %{
+          ReqLLM.Context.tool_result("1", "read", "x")
+          | metadata: %{labels: ["books", "outside"]}
+        }
+      ]
+
+      assert Context.labels(Context.new(messages: messages)) == ["books", "outside"]
+      assert Context.labels(Context.new(messages: [ReqLLM.Context.user("hi")])) == []
+    end
+  end
 end
