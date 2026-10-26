@@ -30,6 +30,7 @@ defmodule WardrikCore do
 
   alias WardrikCore.Agent.State
   alias WardrikCore.Context
+  alias WardrikCore.Turn
 
   @doc "Runs agents under your supervision tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s options."
   def child_spec(opts) do
@@ -208,6 +209,33 @@ defmodule WardrikCore do
   def evaluate(%Context{}, model, state, questions) do
     with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
       {:ok, response.object, WardrikCore.Usage.measurements(response, model)}
+    end
+  end
+
+  @doc """
+  Calls the context's model once on its instructions and messages, offering its tools, from inside
+  a turn. It runs as a `:generate` step through the middleware, so policy and budgets see it as any
+  other model call, and streams nothing.
+
+  Returns the context with the `response`, its message added to `messages`, and what the call used
+  measured.
+
+      summarizing = %{context | instructions: "Summarise this conversation.", tools: []}
+      {:ok, summarized} = WardrikCore.generate(summarizing)
+      ReqLLM.Response.text(summarized.response)
+      #=> "The user asked about..."
+
+  Reach for this when middleware needs the agent's own model, like summarising a long history.
+  """
+  @spec generate(Context.t()) :: WardrikCore.Middleware.result()
+  def generate(%Context{} = context), do: Turn.call_model(context)
+
+  @doc "Returns how many tokens `model` reads at once, as the model catalog gives it, or `nil`."
+  @spec context_window(LLMDB.Model.t() | String.t()) :: pos_integer() | nil
+  def context_window(model) do
+    case ReqLLM.model(model) do
+      {:ok, %LLMDB.Model{limits: %{context: window}}} when is_integer(window) -> window
+      _unknown -> nil
     end
   end
 

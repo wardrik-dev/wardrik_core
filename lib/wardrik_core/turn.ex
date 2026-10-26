@@ -59,6 +59,11 @@ defmodule WardrikCore.Turn do
     end)
   end
 
+  @doc "Calls the context's model once, as a `:generate` step, streaming nothing."
+  @spec call_model(Context.t()) :: WardrikCore.Middleware.result()
+  def call_model(%Context{} = context),
+    do: Context.run(context, :generate, &called(&1, fn _chunk -> :ok end))
+
   @doc "Asks the turn running in `pid` to end at its next step."
   @spec yield(pid()) :: :ok
   def yield(pid) do
@@ -198,12 +203,13 @@ defmodule WardrikCore.Turn do
   defp prompt(%Context{instructions: instructions, messages: messages}),
     do: [ReqLLM.Context.system(instructions) | messages]
 
-  defp generate(%Context{} = context) do
+  defp generate(%Context{} = context), do: called(context, &dispatch(context, &1))
+
+  defp called(context, on_chunk) do
     tools = Enum.map(context.tools, fn tool -> tool.req_llm end)
 
     with {:ok, streamed} <- ReqLLM.stream_text(context.model, prompt(context), tools: tools),
-         {:ok, response} <-
-           ReqLLM.StreamResponse.process_stream(streamed, on_chunk: &dispatch(context, &1)) do
+         {:ok, response} <- ReqLLM.StreamResponse.process_stream(streamed, on_chunk: on_chunk) do
       context =
         Context.measure(
           %{context | response: response},

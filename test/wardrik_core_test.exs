@@ -2,7 +2,63 @@ defmodule WardrikCoreTest do
   use ExUnit.Case, async: true
   use Mimic
 
+  import WardrikCore.Test.LLM
+
+  alias WardrikCore.Context
+
   doctest WardrikCore
+
+  defmodule Watch do
+    @behaviour WardrikCore.Middleware
+
+    @impl true
+    def call(%Context{step: step, metadata: %{test: pid}} = context, next, _opts) do
+      send(pid, {:step, step})
+      next.(%{context | on_chunk: [(&send(pid, {:chunk, &1})) | context.on_chunk]})
+    end
+  end
+
+  describe "generate/1" do
+    test "calls the model through the middleware, streaming nothing, and measures it" do
+      stub(ReqLLM.StreamResponse, :process_stream, fn response, opts ->
+        opts[:on_chunk].(ReqLLM.StreamChunk.text("A summary."))
+        {:ok, response}
+      end)
+
+      response = %{answer("A summary.") | usage: %{input_tokens: 30, output_tokens: 5}}
+
+      expect(ReqLLM, :stream_text, fn "anthropic:claude-haiku-4-5",
+                                      [system, _user],
+                                      [tools: []] ->
+        assert %{role: :system} = system
+        {:ok, response}
+      end)
+
+      context =
+        Context.new(
+          model: "anthropic:claude-haiku-4-5",
+          instructions: "Summarise.",
+          messages: [ReqLLM.Context.user("hi")],
+          middleware: [Watch],
+          metadata: %{test: self()}
+        )
+
+      assert {:ok, generated} = WardrikCore.generate(context)
+      assert ReqLLM.Response.text(generated.response) == "A summary."
+      assert [_user, %{role: :assistant}] = generated.messages
+      assert %{input_tokens: 30, output_tokens: 5} = generated.measurements
+      assert generated.step == nil
+      assert_receive {:step, :generate}
+      refute_received {:chunk, _chunk}
+    end
+  end
+
+  describe "context_window/1" do
+    test "gives what the catalog says a model reads, or nil" do
+      assert WardrikCore.context_window("anthropic:claude-haiku-4-5") == 200_000
+      assert WardrikCore.context_window("nope:nope") == nil
+    end
+  end
 
   describe "evaluate/4" do
     test "gives each answer under its question's name, and what the call used" do
