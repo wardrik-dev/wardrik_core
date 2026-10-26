@@ -117,6 +117,7 @@ defmodule WardrikCore.ContextTest do
 
       assert Context.labels(Context.new(messages: messages)) == ["books", "outside"]
       assert Context.labels(Context.new(messages: [ReqLLM.Context.user("hi")])) == []
+      assert Context.labels(messages) == ["books", "outside"]
     end
   end
 end
