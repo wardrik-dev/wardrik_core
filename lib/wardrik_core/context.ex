@@ -32,7 +32,8 @@ defmodule WardrikCore.Context do
           span: WardrikCore.Span.t() | nil,
           attributes: map(),
           measurements: %{optional(term()) => number()},
-          prices: %{optional(String.t()) => WardrikCore.Usage.price()}
+          prices: %{optional(String.t()) => WardrikCore.Usage.price()},
+          subagent: String.t() | nil
         }
 
   defstruct [
@@ -60,7 +61,8 @@ defmodule WardrikCore.Context do
     metadata: %{},
     attributes: %{},
     measurements: %{},
-    prices: %{}
+    prices: %{},
+    subagent: nil
   ]
 
   def new(opts) do

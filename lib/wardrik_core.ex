@@ -238,6 +238,28 @@ defmodule WardrikCore do
   def generate(%Context{} = context), do: Turn.call_model(context)
 
   @doc """
+  Runs `prompt` as one turn of a subagent, from inside a tool or middleware: the caller's model,
+  middleware and tools, with a conversation of `prompt` alone. It can't wait on a person, so a call
+  that would ends it with an error.
+
+      {:ok, %{text: text, labels: labels}, measurements} =
+        WardrikCore.subagent(context, "Find this week's releases.", name: "researcher")
+
+  Takes `:name`, `:instructions` and `:capabilities` in place of the caller's, `:except_tools`, the
+  names of tools to leave out, and `:max_rounds`. Returns its answer's `text` and the `labels` of
+  what it read, or why it failed, with what it measured either way, to pass to
+  `WardrikCore.Context.measure/2`. While it runs, its context's `subagent` is its name, so
+  middleware that counts what the caller's calls measure can leave its calls to the caller's.
+
+  It emits `[:wardrik_core, :subagent, :started]` with its `prompt`, then `:completed` with its
+  `message`, or `:failed` with its `error`, each with its `agent` `name` and `span`.
+  """
+  @spec subagent(Context.t(), String.t(), keyword()) ::
+          {:ok, %{text: String.t(), labels: [String.t()]}, map()} | {:error, term(), map()}
+  def subagent(%Context{} = context, prompt, opts \\ []),
+    do: WardrikCore.Subagent.run(context, prompt, opts)
+
+  @doc """
   Returns what `model` costs in the model catalog, in US dollars per million tokens, or `nil` where
   it has no price in dollars. Give it, or one built from it, as an agent's `:prices`.
 
