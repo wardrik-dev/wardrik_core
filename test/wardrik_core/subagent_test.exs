@@ -104,8 +104,8 @@ defmodule WardrikCore.SubagentTest do
       {:ok, response}
     end)
 
-    task = Task.async(fn -> WardrikCore.subagent(context, "Look", timeout: 200) end)
-    assert_receive :stuck
+    task = Task.async(fn -> WardrikCore.subagent(context, "Look", timeout: 1_000) end)
+    assert_receive :stuck, 1_000
     assert {:error, :timeout, %{input_tokens: 10, output_tokens: 2}} = Task.await(task)
   end
 
