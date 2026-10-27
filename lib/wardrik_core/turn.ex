@@ -163,10 +163,13 @@ defmodule WardrikCore.Turn do
         failed
 
       :ask ->
-        message = "The model failed #{tries} times: #{reason_text(reason)}. Try again?"
+        message = "The model failed #{times(tries)}: #{reason_text(reason)}. Try again?"
         {:park, %Retry.Exhausted{message: message, labels: Context.labels(context)}, context}
     end
   end
+
+  defp times(1), do: "once"
+  defp times(tries), do: "#{tries} times"
 
   defp reason_text(%{__exception__: true} = error), do: Exception.message(error)
   defp reason_text(reason), do: inspect(reason)
