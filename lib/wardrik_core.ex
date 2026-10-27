@@ -246,7 +246,9 @@ defmodule WardrikCore do
         WardrikCore.subagent(context, "Find this week's releases.", name: "researcher")
 
   Takes `:name`, `:instructions` and `:capabilities` in place of the caller's, `:except_tools`, the
-  names of tools to leave out, and `:max_rounds`. Returns its answer's `text` and the `labels` of
+  names of tools to leave out, `:max_rounds`, and `:timeout`, how long it may run, after which it
+  fails with `:timeout`, in milliseconds or `:infinity`, as unless set. A subagent that crashes
+  fails with `{:exit, reason}`. Returns its answer's `text` and the `labels` of
   what it read, or why it failed, with what it measured either way, to pass to
   `WardrikCore.Context.measure/2`. While it runs, its context's `subagent` is its name, so
   middleware that counts what the caller's calls measure can leave its calls to the caller's.

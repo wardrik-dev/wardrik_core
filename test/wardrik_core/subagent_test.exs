@@ -42,6 +42,14 @@ defmodule WardrikCore.SubagentTest do
     %{context: context}
   end
 
+  defp stuck(test) do
+    send(test, :stuck)
+
+    receive do
+      :never -> :ok
+    end
+  end
+
   defp used(response, input, output),
     do: %{response | usage: %{input_tokens: input, output_tokens: output, total_cost: 0.01}}
 
@@ -80,6 +88,25 @@ defmodule WardrikCore.SubagentTest do
              WardrikCore.subagent(context, "Look", except_tools: ["echo"])
 
     assert_received {:generate, "subagent", []}
+  end
+
+  test "fails once it runs out of time, with what it had measured", %{context: context} do
+    test = self()
+    calls = :counters.new(1, [])
+
+    stub(ReqLLM, :stream_text, fn _model, _messages, _opts ->
+      {:ok, used(calling([call("call_1", "echo", %{"text" => "x"})]), 10, 2)}
+    end)
+
+    stub(ReqLLM.StreamResponse, :process_stream, fn response, _opts ->
+      :counters.add(calls, 1, 1)
+      if :counters.get(calls, 1) > 1, do: stuck(test)
+      {:ok, response}
+    end)
+
+    task = Task.async(fn -> WardrikCore.subagent(context, "Look", timeout: 200) end)
+    assert_receive :stuck
+    assert {:error, :timeout, %{input_tokens: 10, output_tokens: 2}} = Task.await(task)
   end
 
   test "fails where a call would wait on a person", %{context: context} do

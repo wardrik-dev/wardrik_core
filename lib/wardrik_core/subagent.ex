@@ -19,6 +19,7 @@ defmodule WardrikCore.Subagent do
         :capabilities,
         :max_rounds,
         name: "subagent",
+        timeout: :infinity,
         except_tools: []
       ])
 
@@ -27,7 +28,7 @@ defmodule WardrikCore.Subagent do
     began = System.monotonic_time()
 
     emit(context, span, :started, %{agent: %{name: opts[:name]}, prompt: prompt})
-    outcome = context |> within(prompt, span, meter, opts) |> Turn.run() |> answered()
+    outcome = context |> within(prompt, span, meter, opts) |> turned(opts[:timeout]) |> answered()
     measured = Meter.total(meter)
     true = :ets.delete(meter)
     ended = Map.put(outcome_data(outcome, opts[:name]), :duration_ms, ms(began))
@@ -60,6 +61,22 @@ defmodule WardrikCore.Subagent do
         middleware: [{Meter, meter} | context.middleware],
         max_rounds: Keyword.get(opts, :max_rounds, context.max_rounds)
     }
+  end
+
+  defp turned(context, timeout) do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+
+    try do
+      task = Task.Supervisor.async_nolink(supervisor, fn -> Turn.run(context) end)
+
+      case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, {:exit, reason}}
+        nil -> {:error, :timeout}
+      end
+    after
+      Supervisor.stop(supervisor)
+    end
   end
 
   defp capabilities(context, opts) do
