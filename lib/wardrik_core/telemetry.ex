@@ -21,8 +21,12 @@ defmodule WardrikCore.Telemetry do
       or `reason`; measures `duration` and what the step measured
     * `[:wardrik_core, :step, :exception]` - `step`, `span`, `kind`, `reason`, `stacktrace`
     * `[:wardrik_core, :subagent, :started]` - `span`, `agent`, `prompt`
-    * `[:wardrik_core, :subagent, :completed]` - `span`, `agent`, `message`, `duration_ms`
-    * `[:wardrik_core, :subagent, :failed]` - `span`, `agent`, `error`, `duration_ms`
+    * `[:wardrik_core, :subagent, :progress]` - `span`, `agent`, `call`, `tool_calls`, as it
+      begins each tool call
+    * `[:wardrik_core, :subagent, :completed]` - `span`, `agent`, `message`, `duration_ms`,
+      `tool_calls`, `measurements`
+    * `[:wardrik_core, :subagent, :failed]` - `span`, `agent`, `error`, `duration_ms`,
+      `tool_calls`, `measurements`
 
   A turn's `span` is the root of its trace, and it keeps it through a park or a restart. Each step
   runs in a child of it; see `WardrikCore.Span`.

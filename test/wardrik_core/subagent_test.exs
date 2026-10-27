@@ -34,6 +34,7 @@ defmodule WardrikCore.SubagentTest do
 
     :telemetry_test.attach_event_handlers(self(), [
       [:wardrik_core, :subagent, :started],
+      [:wardrik_core, :subagent, :progress],
       [:wardrik_core, :subagent, :completed],
       [:wardrik_core, :subagent, :failed]
     ])
@@ -82,10 +83,29 @@ defmodule WardrikCore.SubagentTest do
     assert_received {:generate, "researcher", ["echo"]}
 
     assert_received {[:wardrik_core, :subagent, :started], _ref, _measurements,
-                     %{agent: %{name: "researcher"}, prompt: "Look", agent_id: "acme/scout"}}
+                     %{
+                       agent: %{name: "researcher"},
+                       prompt: "Look",
+                       agent_id: "acme/scout",
+                       span: span
+                     }}
+
+    assert_received {[:wardrik_core, :subagent, :progress], _ref, _measurements,
+                     %{
+                       agent: %{name: "researcher"},
+                       call: %{id: "call_1"},
+                       tool_calls: 1,
+                       span: ^span
+                     }}
 
     assert_received {[:wardrik_core, :subagent, :completed], _ref, _measurements,
-                     %{message: %ReqLLM.Message{role: :assistant}, duration_ms: ms}}
+                     %{
+                       message: %ReqLLM.Message{role: :assistant},
+                       duration_ms: ms,
+                       tool_calls: 1,
+                       measurements: %{input_tokens: 30, output_tokens: 6},
+                       span: ^span
+                     }}
 
     assert is_integer(ms)
   end
@@ -117,6 +137,9 @@ defmodule WardrikCore.SubagentTest do
     assert_receive :stuck
 
     assert {:error, :timeout, %{input_tokens: 10, output_tokens: 2, usd: 0.01}} = Task.await(task)
+
+    assert_received {[:wardrik_core, :subagent, :failed], _ref, _measurements,
+                     %{error: :timeout, tool_calls: 1, measurements: %{input_tokens: 10}}}
   end
 
   test "fails where a call would wait on a person", %{context: context} do

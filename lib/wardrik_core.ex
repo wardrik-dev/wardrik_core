@@ -253,8 +253,11 @@ defmodule WardrikCore do
   `WardrikCore.Context.measure/2`. While it runs, its context's `subagent` is its name, so
   middleware that counts what the caller's calls measure can leave its calls to the caller's.
 
-  It emits `[:wardrik_core, :subagent, :started]` with its `prompt`, then `:completed` with its
-  `message`, or `:failed` with its `error`, each with its `agent` `name` and `span`.
+  It emits `[:wardrik_core, :subagent, :started]` with its `prompt`, `:progress` as it begins each
+  tool call, with how many it has, then `:completed` with its `message`, or `:failed` with its
+  `error`, each with how many tool calls it made and what it measured, and each with its `agent`
+  `name` and `span`. Its own steps emit nothing to the caller's events, so these are the whole of
+  what a log sees of it.
   """
   @spec subagent(Context.t(), String.t(), keyword()) ::
           {:ok, %{text: String.t(), labels: [String.t()]}, map()} | {:error, term(), map()}

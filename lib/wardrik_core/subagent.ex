@@ -27,11 +27,22 @@ defmodule WardrikCore.Subagent do
     meter = :ets.new(__MODULE__, [:public, :duplicate_bag])
     began = System.monotonic_time()
 
+    metered = %Meter{table: meter, parent: context, span: span, name: opts[:name]}
+
     emit(context, span, :started, %{agent: %{name: opts[:name]}, prompt: prompt})
-    outcome = context |> within(prompt, span, meter, opts) |> turned(opts[:timeout]) |> answered()
+
+    outcome =
+      context |> within(prompt, span, metered, opts) |> turned(opts[:timeout]) |> answered()
+
     measured = Meter.total(meter)
+    tool_calls = Meter.tool_calls(meter)
     true = :ets.delete(meter)
-    ended = Map.put(outcome_data(outcome, opts[:name]), :duration_ms, ms(began))
+
+    ended =
+      outcome
+      |> outcome_data(opts[:name])
+      |> Map.merge(%{duration_ms: ms(began), tool_calls: tool_calls, measurements: measured})
+
     emit(context, span, ended(outcome), ended)
 
     with_measured(outcome, measured)
@@ -40,7 +51,7 @@ defmodule WardrikCore.Subagent do
   defp with_measured({:ok, answer}, measured), do: {:ok, answer, measured}
   defp with_measured({:error, reason}, measured), do: {:error, reason, measured}
 
-  defp within(context, prompt, span, meter, opts) do
+  defp within(context, prompt, span, metered, opts) do
     %{
       context
       | step: nil,
@@ -58,7 +69,7 @@ defmodule WardrikCore.Subagent do
         messages: [ReqLLM.Context.user(prompt)],
         instructions: Keyword.get(opts, :instructions, context.instructions),
         capabilities: capabilities(context, opts),
-        middleware: [{Meter, meter} | context.middleware],
+        middleware: [{Meter, metered} | context.middleware],
         max_rounds: Keyword.get(opts, :max_rounds, context.max_rounds)
     }
   end
@@ -106,7 +117,9 @@ defmodule WardrikCore.Subagent do
 
   defp outcome_data({:error, reason}, name), do: %{agent: %{name: name}, error: reason}
 
-  defp emit(context, span, event, metadata),
+  @doc false
+  @spec emit(Context.t(), WardrikCore.Span.t(), atom(), map()) :: :ok
+  def emit(context, span, event, metadata),
     do:
       Event.emit(
         context,
@@ -117,59 +130,4 @@ defmodule WardrikCore.Subagent do
 
   defp ms(began),
     do: System.convert_time_unit(System.monotonic_time() - began, :native, :millisecond)
-end
-
-defmodule WardrikCore.Subagent.Meter do
-  @moduledoc false
-  @behaviour WardrikCore.Middleware
-
-  alias WardrikCore.Context
-
-  @impl WardrikCore.Middleware
-  def call(%Context{step: :generate} = context, next, meter), do: metered(context, next, meter)
-
-  def call(%Context{step: {:tool_call, _call}} = context, next, meter),
-    do: metered(context, next, meter)
-
-  def call(context, next, _meter), do: next.(context)
-
-  @doc false
-  @spec total(:ets.table()) :: map()
-  def total(meter) do
-    for {:gained, gained} <- :ets.tab2list(meter), reduce: %{} do
-      total -> Map.merge(total, gained, fn _key, held, more -> held + more end)
-    end
-  end
-
-  defp metered(context, next, meter) do
-    result = next.(context)
-    true = :ets.insert(meter, {:gained, gained(context.measurements, measured(result, context))})
-    result
-  end
-
-  defp measured({:ok, after_step}, _context), do: after_step.measurements
-  defp measured({:park, _reason, after_step}, _context), do: after_step.measurements
-  defp measured({:error, _reason}, context), do: context.measurements
-
-  defp gained(before, measured) do
-    measured
-    |> Map.new(fn {key, amount} -> {key, amount - Map.get(before, key, 0)} end)
-    |> Map.reject(fn {_key, amount} -> amount == 0 end)
-  end
-end
-
-defmodule WardrikCore.Subagent.Except do
-  @moduledoc false
-  @behaviour WardrikCore.Capability
-
-  alias WardrikCore.Context
-
-  @impl WardrikCore.Capability
-  def tools(context, {capabilities, names}) do
-    for entry <- capabilities,
-        {module, opts} = Context.entry(entry),
-        tool <- module.tools(context, opts),
-        tool.name not in names,
-        do: tool
-  end
 end
