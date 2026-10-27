@@ -3,6 +3,7 @@ defmodule WardrikCore.ToolRunner do
   alias WardrikCore.Context
   alias WardrikCore.Event
   alias WardrikCore.InDoubt
+  alias WardrikCore.Retry
   alias WardrikCore.Tool
   alias WardrikCore.ToolCall
 
@@ -33,10 +34,7 @@ defmodule WardrikCore.ToolRunner do
     try do
       supervisor
       |> stream(context, calls, opts)
-      |> Enum.zip_with(calls, fn
-        {:ok, {outcome, measured}}, call -> {call, outcome, measured}
-        {:exit, reason}, call -> {call, exited(context, call, reason), %{}}
-      end)
+      |> Enum.zip_with(calls, fn {:ok, {outcome, measured}}, call -> {call, outcome, measured} end)
     after
       Supervisor.stop(supervisor)
     end
@@ -48,13 +46,70 @@ defmodule WardrikCore.ToolRunner do
     Task.Supervisor.async_stream_nolink(
       supervisor,
       calls,
-      &call(%{context | resume: Map.get(resume, &1.id)}, &1),
+      &retried(supervisor, %{context | resume: Map.get(resume, &1.id)}, &1, opts),
       ordered: true,
       max_concurrency: Keyword.get(opts, :max_concurrency, @max_concurrency),
-      timeout: Keyword.get_lazy(opts, :timeout, fn -> timeout(context.tools, calls) end),
-      on_timeout: :kill_task
+      timeout: :infinity
     )
   end
+
+  defp retried(supervisor, context, call, opts) do
+    timeout = Keyword.get_lazy(opts, :timeout, fn -> timeout(context.tools, call) end)
+    attempt = fn -> attempt(supervisor, context, call, timeout) end
+
+    case Retry.run(retries(context, call), attempt, &failed/1, &retrying(context, call, &1)) do
+      {:ok, ran} -> answered(context, call, ran)
+      {:spent, ran, _tries} -> answered(context, call, ran)
+    end
+  end
+
+  defp retries(context, call) do
+    if repeatable?(Context.tool(context, call)),
+      do: context.retries,
+      else: Keyword.put(context.retries, :attempts, 0)
+  end
+
+  defp repeatable?(nil), do: false
+
+  defp repeatable?(tool),
+    do: Tool.annotation(tool, :idempotent, false) or Tool.annotation(tool, :read_only, false)
+
+  defp attempt(supervisor, context, call, timeout) do
+    task = Task.Supervisor.async_nolink(supervisor, fn -> call(context, call) end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, ran} -> ran
+      {:exit, :killed} -> {:stopped, :killed}
+      {:exit, reason} -> {:crashed, {:exit, reason}}
+      nil -> {:crashed, {:exit, :timeout}}
+    end
+  end
+
+  defp failed({:crashed, reason}), do: reason
+  defp failed(_ran), do: nil
+
+  defp retrying(context, call, retry) do
+    Event.emit(
+      context,
+      [:wardrik_core, :tool_call, :retrying],
+      %{},
+      Map.merge(retry, %{
+        agent_id: context.agent_id,
+        span: context.span,
+        call: call
+      })
+    )
+  end
+
+  defp answered(_context, _call, {:crashed, %{__exception__: true} = error}),
+    do: {{:error, error}, %{}}
+
+  defp answered(context, call, {:crashed, {:exit, reason}}),
+    do: {exited(context, call, reason), %{}}
+
+  defp answered(context, call, {:crashed, reason}), do: {exited(context, call, reason), %{}}
+  defp answered(context, call, {:stopped, reason}), do: {exited(context, call, reason), %{}}
+  defp answered(_context, _call, {outcome, measured}), do: {outcome, measured}
 
   @doc "The tool result messages for a batch's answered calls, in order, each with its labels."
   @spec messages([{ToolCall.t(), outcome()}], [Tool.t()]) :: [ReqLLM.Message.t()]
@@ -89,8 +144,8 @@ defmodule WardrikCore.ToolRunner do
       {:park, reason, %Context{measurements: measured}} -> {{:park, reason}, measured}
     end
   catch
-    :error, reason -> {{:error, Exception.normalize(:error, reason, __STACKTRACE__)}, %{}}
-    kind, reason -> {{:error, {kind, reason}}, %{}}
+    :error, reason -> {:crashed, Exception.normalize(:error, reason, __STACKTRACE__)}
+    kind, reason -> {:crashed, {kind, reason}}
   end
 
   defp started(%Context{call_started: nil}, _call), do: :ok
@@ -118,13 +173,11 @@ defmodule WardrikCore.ToolRunner do
 
   defp answered(context, answer), do: %{context | response: answer}
 
-  defp timeout(tools, calls) do
-    names = MapSet.new(calls, & &1.name)
-
-    tools
-    |> Enum.filter(&(&1.name in names))
-    |> Enum.map(&Tool.annotation(&1, :timeout, @timeout))
-    |> Enum.max(fn -> @timeout end)
+  defp timeout(tools, call) do
+    case Enum.find(tools, &(&1.name == call.name)) do
+      nil -> @timeout
+      tool -> Tool.annotation(tool, :timeout, @timeout)
+    end
   end
 
   defp answer(:ok, output), do: output
@@ -136,6 +189,9 @@ defmodule WardrikCore.ToolRunner do
 
   defp message(reason) when is_binary(reason), do: reason
   defp message({:exit, :killed}), do: "The call was stopped before it finished."
+
+  defp message({:exit, :timeout}), do: "The call ran out of time, so it was stopped."
+
   defp message(%{__exception__: true} = error), do: Exception.message(error)
   defp message(%{error: error}) when is_binary(error), do: error
 

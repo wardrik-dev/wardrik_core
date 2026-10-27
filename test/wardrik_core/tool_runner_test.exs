@@ -69,6 +69,75 @@ defmodule WardrikCore.ToolRunnerTest do
            ] = run(context, calls, timeout: 100)
   end
 
+  describe "retries" do
+    setup %{context: context} do
+      test = self()
+      id = "retries-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        id,
+        [:wardrik_core, :tool_call, :retrying],
+        fn _event, _measurements, metadata, _config -> send(test, {:retrying, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+      {:ok, tries} = Agent.start_link(fn -> 0 end)
+      %{context: %{context | agent_id: id, retries: [max_wait: 0]}, tries: tries}
+    end
+
+    defp flaky(tries, fail, annotations) do
+      tool(
+        "flaky",
+        fn _args, _context ->
+          tried = Agent.get_and_update(tries, &{&1, &1 + 1})
+          if tried < 2, do: fail.(), else: {:ok, "done"}
+        end,
+        annotations: annotations
+      )
+    end
+
+    defp with_tool(context, tool), do: %{context | tools: [tool | context.tools]}
+
+    test "runs a repeatable call that crashed, raised or ran out of time again until it answers",
+         %{context: context, tries: tries} do
+      raising = flaky(tries, fn -> raise "blip" end, idempotent: true)
+      assert [{_, {:ok, "done"}}] = run(with_tool(context, raising), [call("1", "flaky")])
+      assert_receive {:retrying, %{call: %{id: "1"}, attempt: 1, reason: %RuntimeError{}}}
+      assert_receive {:retrying, %{attempt: 2, attempts: 6, wait_ms: 0}}
+
+      Agent.update(tries, fn _tried -> 0 end)
+      hanging = flaky(tries, fn -> receive do: (:never -> :ok) end, read_only: true, timeout: 20)
+      assert [{_, {:ok, "done"}}] = run(with_tool(context, hanging), [call("2", "flaky")])
+      assert_receive {:retrying, %{call: %{id: "2"}, reason: {:exit, :timeout}}}
+    end
+
+    test "answers what a tool said went wrong, and never repeats a call that may have changed something",
+         %{context: context, tries: tries} do
+      answering = flaky(tries, fn -> {:error, "No such order."} end, idempotent: true)
+
+      assert [{_, {:error, "No such order."}}] =
+               run(with_tool(context, answering), [call("1", "flaky")])
+
+      Agent.update(tries, fn _tried -> 0 end)
+      changing = flaky(tries, fn -> raise "blip" end, [])
+
+      assert [{_, {:error, %RuntimeError{message: "blip"}}}] =
+               run(with_tool(context, changing), [call("2", "flaky")])
+
+      refute_received {:retrying, _metadata}
+    end
+
+    test "answers with the last failure once the tries are spent", %{
+      context: context,
+      tries: tries
+    } do
+      raising = flaky(tries, fn -> raise "blip" end, idempotent: true)
+      context = %{with_tool(context, raising) | retries: [attempts: 1, max_wait: 0]}
+      assert [{_, {:error, %RuntimeError{message: "blip"}}}] = run(context, [call("1", "flaky")])
+    end
+  end
+
   test "a JSON Schema tool's arguments are validated", %{context: context} do
     schema = %{
       "type" => "object",

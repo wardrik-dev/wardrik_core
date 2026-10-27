@@ -232,6 +232,60 @@ defmodule WardrikCore.TurnTest do
     assert {:error, :rate_limited} = Turn.run(context)
   end
 
+  describe "a model call that failed" do
+    setup %{context: context} do
+      {:ok, calls} = Agent.start_link(fn -> 0 end)
+      %{context: %{context | retries: [max_wait: 0]}, calls: calls}
+    end
+
+    defp failing(calls, failures) do
+      stub(ReqLLM, :stream_text, fn _model, _messages, _opts ->
+        if Agent.get_and_update(calls, &{&1, &1 + 1}) < failures,
+          do: {:error, %ReqLLM.Error.API.Stream{reason: "Stream failed: :timeout"}},
+          else: {:ok, answer("hello")}
+      end)
+    end
+
+    test "is tried again until it answers", %{context: context, calls: calls} do
+      failing(calls, 2)
+      assert {:ok, %Context{messages: [_user, %{role: :assistant}]}} = Turn.run(context)
+      assert Agent.get(calls, & &1) == 3
+    end
+
+    test "waits on a person once its tries are spent, and tries afresh when they say so",
+         %{context: context, calls: calls} do
+      failing(calls, 3)
+      context = %{context | retries: [attempts: 1, max_wait: 0]}
+
+      assert {:park,
+              %WardrikCore.Retry.Exhausted{interrupt: "model_approval", message: message} =
+                exhausted, parked} =
+               Turn.run(context)
+
+      assert message =~ "The model failed 2 times: Stream failed: :timeout. Try again?"
+
+      approved = %Resume{reason: exhausted, input: %{"model" => :approve}}
+      assert {:ok, _context} = Turn.resume(parked, approved)
+
+      denied = %{approved | input: %{"model" => {:deny, "Leave it."}}}
+      assert {:error, "Leave it."} = Turn.resume(parked, denied)
+    end
+
+    test "fails the turn once its tries are spent where told to, or when it can't succeed",
+         %{context: context, calls: calls} do
+      failing(calls, 5)
+
+      assert {:error, %ReqLLM.Error.API.Stream{}} =
+               Turn.run(%{context | retries: [attempts: 1, max_wait: 0, on_exhausted: :fail]})
+
+      stub(ReqLLM, :stream_text, fn _model, _messages, _opts ->
+        {:error, %ReqLLM.Error.API.Request{reason: "bad", status: 400}}
+      end)
+
+      assert {:error, %ReqLLM.Error.API.Request{status: 400}} = Turn.run(context)
+    end
+  end
+
   describe "checkpoints" do
     test "a batch is checkpointed before its tools run", %{context: context} do
       test = self()

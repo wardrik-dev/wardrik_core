@@ -49,6 +49,7 @@ defmodule WardrikCore do
     :middleware,
     :timeout,
     :max_rounds,
+    :retries,
     :principal,
     :credentials,
     :events,

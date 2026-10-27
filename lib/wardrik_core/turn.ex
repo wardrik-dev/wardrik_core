@@ -4,6 +4,7 @@ defmodule WardrikCore.Turn do
   alias WardrikCore.Event
   alias WardrikCore.InDoubt
   alias WardrikCore.Resume
+  alias WardrikCore.Retry
   alias WardrikCore.ToolRunner
   alias WardrikCore.Usage
 
@@ -115,7 +116,7 @@ defmodule WardrikCore.Turn do
   end
 
   defp step(context, rounds) do
-    with {:ok, context} <- Context.run(context, :generate, &generate/1) do
+    with {:ok, context} <- generated(context) do
       context = clear_resume(context)
 
       case tool_calls(context.response) do
@@ -124,6 +125,51 @@ defmodule WardrikCore.Turn do
       end
     end
   end
+
+  defp generated(%Context{resume: %Resume{reason: %Retry.Exhausted{}, input: input}} = context)
+       when is_map(input) do
+    case Map.get(input, "model") do
+      {:deny, reason} -> {:error, reason}
+      _try_again -> retried(context)
+    end
+  end
+
+  defp generated(context), do: retried(context)
+
+  defp retried(context) do
+    generate = fn -> Context.run(context, :generate, &generate/1) end
+
+    case Retry.run(context.retries, generate, &model_failure/1, &model_retrying(context, &1)) do
+      {:ok, generated} -> generated
+      {:spent, failed, tries} -> spent(context, failed, tries)
+    end
+  end
+
+  defp model_failure({:error, reason}), do: if(Retry.transient?(reason), do: reason)
+  defp model_failure(_generated), do: nil
+
+  defp model_retrying(context, retry) do
+    Event.emit(
+      context,
+      [:wardrik_core, :message, :retrying],
+      %{},
+      Map.merge(retry, %{agent_id: context.agent_id, span: context.span})
+    )
+  end
+
+  defp spent(context, {:error, reason} = failed, tries) do
+    case Retry.on_exhausted(context.retries) do
+      :fail ->
+        failed
+
+      :ask ->
+        message = "The model failed #{tries} times: #{reason_text(reason)}. Try again?"
+        {:park, %Retry.Exhausted{message: message, labels: Context.labels(context)}, context}
+    end
+  end
+
+  defp reason_text(%{__exception__: true} = error), do: Exception.message(error)
+  defp reason_text(reason), do: inspect(reason)
 
   defp tool_calls(response) do
     response
