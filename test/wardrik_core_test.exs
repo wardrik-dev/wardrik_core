@@ -60,6 +60,19 @@ defmodule WardrikCoreTest do
     end
   end
 
+  describe "price/1" do
+    test "gives what the catalog says a model costs in dollars, or nil" do
+      assert WardrikCore.price("anthropic:claude-haiku-4-5") == [
+               input: 1.0,
+               output: 5.0,
+               cache_read: 0.1,
+               cache_write: 1.25
+             ]
+
+      assert WardrikCore.price("nope:nope") == nil
+    end
+  end
+
   describe "evaluate/4" do
     test "gives each answer under its question's name, and what the call used" do
       questions = %{"urgent" => %{type: :boolean, instructions: "Is this urgent?"}}

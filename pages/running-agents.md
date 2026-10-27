@@ -78,6 +78,7 @@ call's id `:approve` to run it again, or `{:deny, reason}` to tell the model why
 | `metadata` | anything of yours, given to middleware | `%{}` |
 | `timeout` | how long a turn may take | `:infinity` |
 | `max_rounds` | the model calls a turn may make | 25 |
+| `prices` | what models cost, by spec, in US dollars per million tokens, as `%{"zai_coding_plan:glm-5.1" => [input: 1.54, output: 4.84]}`, over the model catalog's | `%{}` |
 
 
 ## Control a running agent

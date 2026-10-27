@@ -100,6 +100,20 @@ defmodule WardrikCore.TurnTest do
     refute Map.has_key?(measurements, :usd)
   end
 
+  test "prices a model call at the agent's prices, over the catalog's", %{context: context} do
+    usage = %{input_tokens: 1_000, cache_read_tokens: 400, output_tokens: 100, total_cost: 0.5}
+    response = %{answer("hello") | usage: usage}
+    prices = %{"zai_coding_plan:glm-5.3-flash" => [input: 1.0, output: 4.0, cache_read: 0.5]}
+    expect(ReqLLM, :stream_text, 2, fn _model, _messages, _opts -> {:ok, response} end)
+
+    assert {:ok, %Context{measurements: %{usd: usd}}} =
+             Turn.run(%{context | model: "zai_coding_plan:glm-5.3-flash", prices: prices})
+
+    assert_in_delta usd, (600 * 1.0 + 400 * 0.5 + 100 * 4.0) / 1_000_000, 1.0e-12
+
+    assert {:ok, %Context{measurements: %{usd: 0.5}}} = Turn.run(%{context | prices: prices})
+  end
+
   test "offers the capabilities' tools to the model", %{context: context} do
     expect(ReqLLM, :stream_text, fn _model, _messages, opts ->
       assert [%ReqLLM.Tool{name: "echo"}] = opts[:tools]

@@ -40,6 +40,7 @@ defmodule WardrikCore.Agent.State do
     :credentials,
     :events,
     :metadata,
+    :prices,
     :private,
     :messages
   ]
@@ -184,6 +185,10 @@ defmodule WardrikCore.Agent.State do
 
   defp load_context(dumped, agent_id),
     do: struct(WardrikCore.Context, Map.put(dumped, :agent_id, agent_id))
+
+  @doc false
+  def canonical_prices!(prices),
+    do: Map.new(prices, fn {spec, price} -> {canonical_spec!(spec), price} end)
 
   @doc false
   def canonical_spec!(spec) do

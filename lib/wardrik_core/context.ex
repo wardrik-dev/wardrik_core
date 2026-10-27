@@ -31,7 +31,8 @@ defmodule WardrikCore.Context do
           metadata: map(),
           span: WardrikCore.Span.t() | nil,
           attributes: map(),
-          measurements: %{optional(term()) => number()}
+          measurements: %{optional(term()) => number()},
+          prices: %{optional(String.t()) => WardrikCore.Usage.price()}
         }
 
   defstruct [
@@ -58,7 +59,8 @@ defmodule WardrikCore.Context do
     private: %{},
     metadata: %{},
     attributes: %{},
-    measurements: %{}
+    measurements: %{},
+    prices: %{}
   ]
 
   def new(opts) do
@@ -90,7 +92,8 @@ defmodule WardrikCore.Context do
 
   Measurements add up over the turn, and each step reports its own share when it ends. Core
   measures each model call's `input_tokens` and `output_tokens`, and its `usd` when the model has a
-  price in dollars. A call to a model without one counts in `unpriced_calls`.
+  price in dollars, in the agent's `prices` or else the model catalog. A call to a model without one
+  counts in `unpriced_calls`.
   """
   @spec measure(t(), term(), number()) :: t()
   def measure(%__MODULE__{measurements: measurements} = context, key, amount),

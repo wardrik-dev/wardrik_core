@@ -262,7 +262,7 @@ defmodule WardrikCore.Turn do
       context =
         Context.measure(
           %{context | response: response},
-          Usage.measurements(response, context.model)
+          Usage.measurements(response, context.model, context.prices)
         )
 
       {:ok, append_messages(context, [response.message])}

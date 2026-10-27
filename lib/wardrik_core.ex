@@ -53,13 +53,18 @@ defmodule WardrikCore do
     :principal,
     :credentials,
     :events,
-    :metadata
+    :metadata,
+    :prices
   ]
 
   @doc "Starts an agent, or loads it if it was saved before."
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_agent(instance \\ __MODULE__, opts) do
-    opts = Keyword.validate!(opts, [:agent_id, :model | @config])
+    opts =
+      opts
+      |> Keyword.validate!([:agent_id, :model | @config])
+      |> Keyword.replace_lazy(:prices, &State.canonical_prices!/1)
+
     agent_id = Keyword.fetch!(opts, :agent_id)
     context = Context.new([agent_id: agent_id] ++ Keyword.take(opts, @config))
     state = State.new(agent_id: agent_id, model: Keyword.fetch!(opts, :model), context: context)
@@ -78,6 +83,7 @@ defmodule WardrikCore do
       opts
       |> Keyword.validate!([:model | @config])
       |> Keyword.replace_lazy(:model, &State.canonical_spec!/1)
+      |> Keyword.replace_lazy(:prices, &State.canonical_prices!/1)
 
     GenServer.call(agent, {:configure, opts})
   end
@@ -207,9 +213,9 @@ defmodule WardrikCore do
   """
   @spec evaluate(Context.t(), String.t(), String.t() | map(), map()) ::
           {:ok, map(), %{atom() => number()}} | {:error, term()}
-  def evaluate(%Context{}, model, state, questions) do
+  def evaluate(%Context{} = context, model, state, questions) do
     with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
-      {:ok, response.object, WardrikCore.Usage.measurements(response, model)}
+      {:ok, response.object, WardrikCore.Usage.measurements(response, model, context.prices)}
     end
   end
 
@@ -230,6 +236,16 @@ defmodule WardrikCore do
   """
   @spec generate(Context.t()) :: WardrikCore.Middleware.result()
   def generate(%Context{} = context), do: Turn.call_model(context)
+
+  @doc """
+  Returns what `model` costs in the model catalog, in US dollars per million tokens, or `nil` where
+  it has no price in dollars. Give it, or one built from it, as an agent's `:prices`.
+
+      WardrikCore.price("anthropic:claude-haiku-4-5")
+      #=> [input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25]
+  """
+  @spec price(LLMDB.Model.t() | String.t()) :: WardrikCore.Usage.price() | nil
+  def price(model), do: WardrikCore.Usage.price(model)
 
   @doc "Returns how many tokens `model` reads at once, as the model catalog gives it, or `nil`."
   @spec context_window(LLMDB.Model.t() | String.t()) :: pos_integer() | nil
