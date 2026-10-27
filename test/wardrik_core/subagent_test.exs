@@ -23,6 +23,15 @@ defmodule WardrikCore.SubagentTest do
   setup do
     stub(ReqLLM.StreamResponse, :process_stream, fn response, _opts -> {:ok, response} end)
 
+    priced =
+      struct(LLMDB.Model,
+        provider: :anthropic,
+        id: "claude-haiku-4-5",
+        pricing: %{currency: "USD"}
+      )
+
+    stub(ReqLLM, :model, fn _spec -> {:ok, priced} end)
+
     :telemetry_test.attach_event_handlers(self(), [
       [:wardrik_core, :subagent, :started],
       [:wardrik_core, :subagent, :completed],
@@ -91,7 +100,6 @@ defmodule WardrikCore.SubagentTest do
   end
 
   test "fails once it runs out of time, with what it had measured", %{context: context} do
-    assert WardrikCore.price(context.model)
     test = self()
     calls = :counters.new(1, [])
 
@@ -105,9 +113,10 @@ defmodule WardrikCore.SubagentTest do
       {:ok, response}
     end)
 
-    task = Task.async(fn -> WardrikCore.subagent(context, "Look", timeout: 1_000) end)
-    assert_receive :stuck, 1_000
-    assert {:error, :timeout, %{input_tokens: 10, output_tokens: 2}} = Task.await(task)
+    task = Task.async(fn -> WardrikCore.subagent(context, "Look", timeout: 200) end)
+    assert_receive :stuck
+
+    assert {:error, :timeout, %{input_tokens: 10, output_tokens: 2, usd: 0.01}} = Task.await(task)
   end
 
   test "fails where a call would wait on a person", %{context: context} do
