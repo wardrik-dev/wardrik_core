@@ -91,6 +91,7 @@ defmodule WardrikCore.SubagentTest do
   end
 
   test "fails once it runs out of time, with what it had measured", %{context: context} do
+    assert WardrikCore.price(context.model)
     test = self()
     calls = :counters.new(1, [])
 
