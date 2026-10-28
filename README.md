@@ -42,7 +42,7 @@ a backend that stores them, like a disk or an S3 bucket. See
 - [Tools](pages/tools.md): capabilities, tool annotations, and reporting what a call cost.
 - [Middleware](pages/middleware.md): wrapping every call, parking for a person, and private state.
 - [Principals](pages/principals.md): acting on someone's behalf.
-- [Credentials](pages/credentials.md): using a person's tokens, and their sign-in.
+- [Credentials](pages/credentials.md): using a person's tokens, their sign-in, and your own keys.
 - [Tracing](pages/tracing.md): spans, attributes, and measurements.
 - [Events](pages/events.md): following what an agent does, from a CLI, a TUI or a web page.
 
@@ -52,8 +52,8 @@ Core runs agents durably, and gives packages seams to extend them.
 
 - **It runs agents:** turns, tools, checkpoints, parking and resuming, and carrying on after a
   crash.
-- **It gives seams:** capabilities, middleware, tool annotations, principals, credentials, and
-  events.
+- **It gives seams:** capabilities, middleware, tool annotations, principals, credentials, keys,
+  and events.
 - **It leaves the rest to packages:** policy, MCP servers, storing secrets, OAuth, event logs,
   transports like HTTP, and clients.
 

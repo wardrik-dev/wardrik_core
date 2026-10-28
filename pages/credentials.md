@@ -74,6 +74,28 @@ app finds the token already stored, and resumes that agent straight away. They o
 
 A credential is a value. It's never kept in the context, so it's never saved or emitted.
 
+## Keys
+
+Credentials are what a tool's call needs as the person it acts for. Keys are what the code you
+install needs as yours: a model provider's key, or a search API's. Give an agent a
+`WardrikCore.Keys` module as `keys: {MyApp.Keys, opts}`, and it's asked for each key by name, for
+the agent's principal, so an org can bring its own:
+
+```elixir
+defmodule MyApp.Keys do
+  @behaviour WardrikCore.Keys
+
+  @impl true
+  def fetch(name, principal, _opts), do: MyApp.Vault.key(principal, name)
+end
+```
+
+Every model call asks for its provider's key, by the name ReqLLM gives it, as `ANTHROPIC_API_KEY`,
+and passes it to that call alone. A capability or middleware asks with
+`WardrikCore.Keys.fetch(context, "BRAVE_API_KEY")`. Where none is held, ReqLLM finds a key itself,
+in its config or the environment. Keep keys apart from credentials: a tool's credential is named by
+what an agent's owner configures, and a key must never be.
+
 `[:wardrik_core, :turn, :stop]` carries a parked turn's `reason`, so you can watch who's waiting
 on what, like on a dashboard, or with an alert for an agent left waiting. Its handlers run in the
 agent's own process, so use them to watch, not to resume agents.

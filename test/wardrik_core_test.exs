@@ -87,7 +87,8 @@ defmodule WardrikCoreTest do
 
       expect(ReqLLM, :evaluate, fn "anthropic:claude-haiku-4-5",
                                    "The site is down.",
-                                   ^questions ->
+                                   ^questions,
+                                   [] ->
         {:ok,
          %ReqLLM.Response{
            id: "eval",
@@ -110,7 +111,7 @@ defmodule WardrikCoreTest do
     end
 
     test "passes on why the model couldn't answer" do
-      expect(ReqLLM, :evaluate, fn _model, _state, _questions -> {:error, :timeout} end)
+      expect(ReqLLM, :evaluate, fn _model, _state, _questions, _opts -> {:error, :timeout} end)
 
       assert {:error, :timeout} =
                WardrikCore.evaluate(WardrikCore.Context.new([]), "typesafe:jev-latest", "x", %{})

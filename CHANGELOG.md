@@ -15,6 +15,8 @@
 - `WardrikCore.Credentials`, which gives a tool the credentials of whoever its turn acts for. One
   the person hasn't granted yet parks the call on a `WardrikCore.Authorization`, and one a service
   refuses is reported with `WardrikCore.Credentials.refused/2`.
+- `WardrikCore.Keys`, which gives installed code its keys, like a model provider's, for whoever the
+  agent works for. Every model call passes its provider's key, where one is held, to that call.
 - A parked turn's stop event carries why it parked.
 - `WardrikCore.Event`, which sends each event to `:telemetry` and to the agent's
   `WardrikCore.Events` sink, for clients that follow it. Packages emit theirs the same way. Text

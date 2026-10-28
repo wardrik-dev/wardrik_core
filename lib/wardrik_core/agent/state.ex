@@ -38,6 +38,7 @@ defmodule WardrikCore.Agent.State do
     :timeout,
     :principal,
     :credentials,
+    :keys,
     :events,
     :metadata,
     :prices,

@@ -78,6 +78,7 @@ defmodule WardrikCore do
     :retries,
     :principal,
     :credentials,
+    :keys,
     :events,
     :metadata,
     :prices
@@ -240,7 +241,13 @@ defmodule WardrikCore do
   @spec evaluate(Context.t(), String.t(), String.t() | map(), map()) ::
           {:ok, map(), %{atom() => number()}} | {:error, term()}
   def evaluate(%Context{} = context, model, state, questions) do
-    with {:ok, response} <- ReqLLM.evaluate(model, state, questions) do
+    with {:ok, response} <-
+           ReqLLM.evaluate(
+             model,
+             state,
+             questions,
+             WardrikCore.Keys.model_options(context, model)
+           ) do
       {:ok, response.object, WardrikCore.Usage.measurements(response, model, context.prices)}
     end
   end
