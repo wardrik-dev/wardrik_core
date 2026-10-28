@@ -32,16 +32,42 @@ defmodule WardrikCore do
   alias WardrikCore.Context
   alias WardrikCore.Turn
 
-  @doc "Runs agents under your supervision tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s options."
+  @doc """
+  Runs agents under your supervision tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s
+  options. It loads every module of `wardrik_core`, `req_llm` and each app built on
+  `wardrik_core` first, so a backend that decodes saved agents with `[:safe]` knows every struct
+  they name.
+  """
   def child_spec(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
 
-    [prefix: "wardrik/"]
-    |> Keyword.merge(opts)
-    |> Keyword.merge(name: agents(name), backend: Keyword.fetch!(opts, :backend))
-    |> DurableServer.Supervisor.child_spec()
-    |> Map.put(:id, name)
+    spec =
+      [prefix: "wardrik/"]
+      |> Keyword.merge(opts)
+      |> Keyword.merge(name: agents(name), backend: Keyword.fetch!(opts, :backend))
+      |> DurableServer.Supervisor.child_spec()
+
+    %{spec | id: name, start: {__MODULE__, :start_loaded, [spec.start]}}
   end
+
+  @doc false
+  def start_loaded({module, function, args}) do
+    :ok = load_kept()
+    apply(module, function, args)
+  end
+
+  @kept [:wardrik_core, :req_llm]
+
+  defp load_kept do
+    for {app, _description, _vsn} <- Application.loaded_applications(),
+        kept?(app),
+        do: app |> Application.spec(:modules) |> Code.ensure_all_loaded()
+
+    :ok
+  end
+
+  defp kept?(app),
+    do: app in @kept or :wardrik_core in (Application.spec(app, :applications) || [])
 
   @config [
     :instructions,

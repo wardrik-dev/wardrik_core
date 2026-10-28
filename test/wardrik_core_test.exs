@@ -18,6 +18,14 @@ defmodule WardrikCoreTest do
     end
   end
 
+  describe "child_spec/1" do
+    test "loads every module a saved agent may name before agents start" do
+      for app <- [:wardrik_core, :req_llm], module <- Application.spec(app, :modules) do
+        assert :code.is_loaded(module), "#{inspect(module)} isn't loaded"
+      end
+    end
+  end
+
   describe "generate/1" do
     test "calls the model through the middleware, streaming nothing, and measures it" do
       stub(ReqLLM.StreamResponse, :process_stream, fn response, opts ->
