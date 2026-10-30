@@ -1,27 +1,21 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0-rc.1 (2026-10-30)
 
-- Durable agents that run a model and its tools in a loop, and pick up where they left off after a
-  crash, kept in any `DurableServer` backend.
-- `WardrikCore.Backends.MemoryStore`, which keeps agents in memory for tests.
+- Durable agents that run a model and its tools in a loop, kept in any `DurableServer` backend.
+  They pick up where they left off after a crash. `WardrikCore.Backends.MemoryStore` keeps them in
+  memory for tests.
 - Capabilities that hand an agent its tools, and middleware that wraps every turn, model call and
   tool call. Middleware can answer a step, or park it until a person resumes it.
-- Tool annotations, facts about a tool any package can read, like `read_only` and `idempotent`. A
-  call lost in a crash is repeated only if its tool is idempotent, and parks as `:in_doubt`
-  otherwise.
-- Principals, as in IAM. An agent has its own, a message can come from another, and the turn that
-  answers acts on their behalf. Each step's span says who it was for, as `enduser.id`.
-- `WardrikCore.Credentials`, which gives a tool the credentials of whoever its turn acts for. One
-  the person hasn't granted yet parks the call on a `WardrikCore.Authorization`, and one a service
-  refuses is reported with `WardrikCore.Credentials.refused/2`.
-- `WardrikCore.Keys`, which gives installed code its keys, like a model provider's, for whoever the
-  agent works for. Every model call passes its provider's key, where one is held, to that call.
-- A parked turn's stop event carries why it parked.
+- Tool annotations, like `read_only` and `idempotent`. A call lost in a crash is repeated only if
+  its tool is idempotent, and parks as `:in_doubt` otherwise.
+- Principals, as in IAM. The turn that answers a message acts on behalf of whoever sent it, and
+  each step's span says so as `enduser.id`.
+- `WardrikCore.Credentials` and `WardrikCore.Keys`, which give tools and model calls the
+  credentials and keys of whoever the agent works for. A credential not yet granted parks the call
+  on a `WardrikCore.Authorization`.
+- `WardrikCore.subagent/3`, which runs a subagent on its parent's model, middleware and tools.
 - `WardrikCore.Event`, which sends each event to `:telemetry` and to the agent's
-  `WardrikCore.Events` sink, for clients that follow it. Packages emit theirs the same way. Text
-  streams as `[:wardrik_core, :message, :delta]`.
-- A tool reports on its step, like what it cost, by answering with its context.
-- Every turn is a trace and every step a span, with attributes and measurements, reported as
-  telemetry events.
-- `WardrikCore.evaluate/4`, which asks an evaluation model questions about a step.
+  `WardrikCore.Events` sink. Text streams as `[:wardrik_core, :message, :delta]`.
+- Every turn a trace and every step a span, with what each tool reports it cost.
+  `WardrikCore.evaluate/4` asks an evaluation model questions about a step.
