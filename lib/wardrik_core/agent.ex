@@ -26,7 +26,7 @@ defmodule WardrikCore.Agent do
     send(self(), :maybe_run)
 
     emit(state, [:agent, :start], %{system_time: System.system_time()}, %{state: state.state})
-    {:ok, state}
+    {:ok, state, permanent: true}
   end
 
   @impl true

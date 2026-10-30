@@ -17,8 +17,8 @@ defmodule WardrikCore do
       WardrikCore.history(agent)
 
   `ask/3` returns once the message is stored. Agents in memory, as here, are gone when the node
-  stops. With a backend that keeps them, such as a disk or an S3 bucket, an agent whose node dies
-  mid-turn picks the message back up when it restarts. See
+  stops. An agent that crashes comes back by itself and picks its message back up. With a backend
+  that keeps them, such as a disk or an S3 bucket, so does one whose node dies. See
   [Run agents](running-agents.html#where-agents-are-kept) for the backends.
 
   ## Turns

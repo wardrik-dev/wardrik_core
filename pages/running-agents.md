@@ -75,9 +75,10 @@ That behaviour isn't a stable contract yet, so expect changes between durable_se
 
 ## When a node dies
 
-With a backend that keeps agents, an agent whose node dies mid-turn picks the message back up when
-it restarts. A turn lost while its tools ran resumes from its last checkpoint, without calling the
-model again.
+An agent that crashes comes back by itself, as does one whose node dies, with a backend that keeps
+agents. A sweep for lost agents restarts it, every `:discovery_interval_ms` (`60_000` unless set),
+and it picks its message back up. A turn lost while its tools ran resumes from its last checkpoint,
+without calling the model again. An agent stopped with `stop/1` stays stopped.
 
 A tool call lost that way may already have run:
 

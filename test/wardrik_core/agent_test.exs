@@ -129,6 +129,44 @@ defmodule WardrikCore.AgentTest do
     assert [:user, :assistant] = Enum.map(messages, & &1.role)
   end
 
+  test "an agent killed while its tools run comes back by itself and finishes its turn" do
+    Process.register(self(), WardrikCore.AgentTest)
+    backend = {WardrikCore.Backends.MemoryStore, name: :crash_test}
+    start_supervised!({WardrikCore.Backends.MemoryStore, name: :crash_test})
+
+    start_supervised!(
+      {WardrikCore,
+       name: CrashTest,
+       prefix: "crash/",
+       backend: backend,
+       discovery_interval_ms: 50,
+       initial_discovery_delay_ms: 0}
+    )
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, calling([call("call-a", "block")])} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, answer("done")} end)
+
+    id = "agent-#{System.unique_integer([:positive])}"
+
+    {:ok, agent} =
+      WardrikCore.start_agent(CrashTest,
+        agent_id: id,
+        model: "anthropic:claude-haiku-4-5",
+        capabilities: [Blocking]
+      )
+
+    WardrikCore.ask(agent, "hi")
+    assert_receive {:tool_running, "call-a", _tool}
+    assert_receive {[:turn, :checkpoint], %{agent_id: ^id}}
+    Process.exit(agent, :kill)
+
+    assert_receive {[:turn, :start], %{agent_id: ^id, kind: :recover}}, 5_000
+    assert_receive {:tool_running, "call-a", tool}
+    send(tool, :release)
+    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :recover, outcome: :ok}}
+  end
+
   test "an agent lost while its tools run recovers the batch without asking the model again" do
     Process.register(self(), WardrikCore.AgentTest)
 
