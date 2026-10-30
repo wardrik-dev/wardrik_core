@@ -1,19 +1,36 @@
 # Run agents
 
-Run agents under your app's supervision tree. A backend saves each agent's state, so it survives a
-restart:
+## Setup
+
+Paste this into a fresh IEx session. It keeps agents in memory, and needs an Anthropic key for the
+model calls:
 
 ```elixir
+Mix.install([{:wardrik_core, "~> 0.1.0-rc.1"}])
+System.put_env("ANTHROPIC_API_KEY", "sk-ant-...")
+
 children = [
-  {EKV, name: :agents, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
-  {WardrikCore, backend: {DurableServer.Backends.EKVStore, name: :agents}}
+  {WardrikCore.Backends.MemoryStore, name: :agents},
+  {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
 ]
 
-Supervisor.start_link(children, strategy: :rest_for_one)
-
-{:ok, agent} = WardrikCore.start_agent(agent_id: "triage", model: "anthropic:claude-haiku-4-5")
-:ok = WardrikCore.ask(agent, "What's on fire?")
+{:ok, _} = Supervisor.start_link(children, strategy: :rest_for_one)
 ```
+
+Replace `"sk-ant-..."` with your key. In an app, put the two children in your supervision tree
+instead.
+
+## Start an agent
+
+```elixir
+{:ok, agent} = WardrikCore.start_agent(agent_id: "support", model: "anthropic:claude-haiku-4-5")
+:ok = WardrikCore.ask(agent, "What's on fire?")
+
+WardrikCore.history(agent)
+#=> [#Message<:user text>, #Message<:assistant text>]
+```
+
+`ask/3` returns once the message is stored. The agent answers in its own process.
 
 ## Where agents are kept
 
@@ -28,23 +45,29 @@ Supervisor.start_link(children, strategy: :rest_for_one)
 
 `MemoryStore` is `WardrikCore.Backends.MemoryStore`. The rest are under `DurableServer.Backends`.
 
-EKV is optional. Add it only if you use `EKVStore`:
+To keep agents on disk, add `{:ekv, "~> 0.4"}` to your deps. Then start `EKV` first in your
+supervision tree:
 
 ```elixir
-{:ekv, "~> 0.4"}
+children = [
+  {EKV, name: :agents, data_dir: "/var/lib/my_app/agents", cluster_size: 1},
+  {WardrikCore, backend: {DurableServer.Backends.EKVStore, name: :agents}}
+]
 ```
 
 An S3-compatible bucket needs no extra dependency:
 
 ```elixir
-{WardrikCore,
- backend:
-   {DurableServer.Backends.ObjectStore,
-    bucket: "my-app-agents",
-    access_key_id: System.fetch_env!("AWS_ACCESS_KEY_ID"),
-    secret_access_key: System.fetch_env!("AWS_SECRET_ACCESS_KEY"),
-    s3_endpoint: "https://s3.amazonaws.com",
-    default_region: "us-east-1"}}
+children = [
+  {WardrikCore,
+   backend:
+     {DurableServer.Backends.ObjectStore,
+      bucket: "my-app-agents",
+      access_key_id: System.fetch_env!("AWS_ACCESS_KEY_ID"),
+      secret_access_key: System.fetch_env!("AWS_SECRET_ACCESS_KEY"),
+      s3_endpoint: "https://s3.amazonaws.com",
+      default_region: "us-east-1"}}
+]
 ```
 
 To write your own backend, such as one for Postgres, implement durable_server's storage behaviour.
@@ -52,9 +75,9 @@ That behaviour isn't a stable contract yet, so expect changes between durable_se
 
 ## When a node dies
 
-`ask/3` returns once the message is stored. If the node dies mid-turn, the agent picks the message
-back up when it restarts. A turn lost while its tools ran resumes from its last checkpoint, without
-calling the model again.
+With a backend that keeps agents, an agent whose node dies mid-turn picks the message back up when
+it restarts. A turn lost while its tools ran resumes from its last checkpoint, without calling the
+model again.
 
 A tool call lost that way may already have run:
 
@@ -62,11 +85,13 @@ A tool call lost that way may already have run:
 * Otherwise it parks as `:in_doubt`. Answer it with `resume/3`:
 
 ```elixir
-# Run it again
-WardrikCore.resume(agent, %{"call_1" => :approve})
+{:tool_calls, [{call, {:park, :in_doubt}}]} = WardrikCore.parked(agent)
 
-# Tell the model it didn't run
-WardrikCore.resume(agent, %{"call_1" => {:deny, "It may have run already."}})
+# Run it again
+WardrikCore.resume(agent, %{call.id => :approve})
+
+# Or tell the model it didn't run
+WardrikCore.resume(agent, %{call.id => {:deny, "It may have run already."}})
 ```
 
 ## Options
@@ -88,8 +113,14 @@ WardrikCore.resume(agent, %{"call_1" => {:deny, "It may have run already."}})
 | `retries` | how failed calls are retried. See `WardrikCore.Retry` | `[]` |
 | `prices` | model prices in US dollars per million tokens, by spec. Takes precedence over the model catalog | `%{}` |
 
+`configure/2` changes them on a running agent, from its next turn:
+
 ```elixir
-prices: %{"zai_coding_plan:glm-5.1" => [input: 1.54, output: 4.84]}
+:ok =
+  WardrikCore.configure(agent,
+    instructions: "Answer in one sentence.",
+    prices: %{"anthropic:claude-haiku-4-5" => [input: 1.0, output: 5.0]}
+  )
 ```
 
 ## Control a running agent
@@ -107,3 +138,13 @@ prices: %{"zai_coding_plan:glm-5.1" => [input: 1.54, output: 4.84]}
 | `list/1`, `whereis/2` | Every saved agent's id, and the running agent for an id |
 | `nodes/1`, `placements/1` | The cluster's nodes, and the node each saved agent runs on |
 | `move/3` | Restarts an agent on another node, with its saved state |
+
+```elixir
+WardrikCore.status(agent)
+#=> :idle
+
+WardrikCore.list()
+#=> ["support"]
+
+:ok = WardrikCore.delete("support")
+```

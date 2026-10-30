@@ -1,5 +1,42 @@
 # Middleware
 
+## Setup
+
+Paste this into a fresh IEx session. The model calls need an Anthropic key. The agent gets the
+order tool from [Tools](tools.md):
+
+```elixir
+Mix.install([{:wardrik_core, "~> 0.1.0-rc.1"}])
+System.put_env("ANTHROPIC_API_KEY", "sk-ant-...")
+
+children = [
+  {WardrikCore.Backends.MemoryStore, name: :agents},
+  {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
+]
+
+{:ok, _} = Supervisor.start_link(children, strategy: :rest_for_one)
+
+defmodule MyApp.Orders do
+  @behaviour WardrikCore.Capability
+
+  @impl true
+  def tools(_context, orders) do
+    [
+      WardrikCore.Tool.new!(
+        name: "order_status",
+        description: "Say where an order is.",
+        schema: [order_id: [type: :string, required: true]],
+        run: fn %{order_id: id}, _context -> {:ok, Map.get(orders, id, "unknown")} end
+      )
+    ]
+  end
+end
+```
+
+Replace `"sk-ant-..."` with your key.
+
+## Wrapping every call
+
 Middleware wraps each turn, model call and tool call. It reads the step from `context.step`, then
 calls `next` to carry on or answers the step itself. This one refuses the shell:
 
@@ -42,15 +79,30 @@ defmodule MyApp.Approve do
   defp answer(%{resume: %{input: answers}}, call), do: Map.get(answers, call.id)
   defp answer(_context, _call), do: nil
 end
+
+{:ok, agent} =
+  WardrikCore.start_agent(
+    agent_id: "support",
+    model: "anthropic:claude-haiku-4-5",
+    capabilities: [{MyApp.Orders, %{"1001" => "shipped"}}],
+    middleware: [MyApp.NoShell, MyApp.Approve]
+  )
+
+:ok = WardrikCore.ask(agent, "Where is order 1001?")
 ```
 
-The turn waits until you resume it with an answer for each call. Pass who answered as metadata. It
-appears on the resumed turn's start event:
+The first middleware in the list runs outermost. The turn waits until you resume it with an answer
+for each call:
 
 ```elixir
-{:tool_calls, calls} = WardrikCore.parked(agent)
-WardrikCore.resume(agent, %{"call_1" => :approve}, %{by: maria})
+{:tool_calls, [{call, {:park, :approval}}]} = WardrikCore.parked(agent)
+#=> {:tool_calls, [{%WardrikCore.ToolCall{name: "order_status", ...}, {:park, :approval}}]}
+
+:ok = WardrikCore.resume(agent, %{call.id => :approve}, %{by: "user:maria"})
 ```
+
+The metadata, here who answered, appears on the resumed turn's
+`[:wardrik_core, :turn, :start]` event.
 
 ## Private state
 
