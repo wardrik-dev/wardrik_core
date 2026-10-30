@@ -12,7 +12,7 @@ defmodule WardrikCore.Turn do
   @type checkpoint :: %{
           messages: [ReqLLM.Message.t()],
           calls: [WardrikCore.ToolCall.t()],
-          rounds: non_neg_integer(),
+          rounds: non_neg_integer() | :infinity,
           metadata: map(),
           private: map(),
           span: WardrikCore.Span.t(),
@@ -210,9 +210,12 @@ defmodule WardrikCore.Turn do
     else
       context
       |> append_messages(ToolRunner.messages(results, context.tools))
-      |> loop(rounds - 1)
+      |> loop(less(rounds))
     end
   end
+
+  defp less(:infinity), do: :infinity
+  defp less(rounds), do: rounds - 1
 
   defp yield_requested? do
     receive do

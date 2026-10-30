@@ -24,7 +24,7 @@ defmodule WardrikCore.Context do
           events: entry() | nil,
           tools: [WardrikCore.Tool.t()],
           middleware: [entry()],
-          max_rounds: pos_integer(),
+          max_rounds: pos_integer() | :infinity,
           retries: WardrikCore.Retry.t(),
           principal: WardrikCore.Principal.t() | nil,
           timeout: timeout(),

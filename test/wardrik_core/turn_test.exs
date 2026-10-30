@@ -197,6 +197,21 @@ defmodule WardrikCore.TurnTest do
     assert {:error, :max_rounds} = Turn.run(%{context | max_rounds: 2})
   end
 
+  test "makes as many rounds of tool use as it needs with max_rounds of :infinity", %{
+    context: context
+  } do
+    {:ok, rounds} = Agent.start_link(fn -> 30 end)
+
+    stub(ReqLLM, :stream_text, fn _, _, _ ->
+      case Agent.get_and_update(rounds, &{&1, &1 - 1}) do
+        0 -> {:ok, answer("done")}
+        _more -> {:ok, calling([call("1", "echo")])}
+      end
+    end)
+
+    assert {:ok, %Context{}} = Turn.run(%{context | max_rounds: :infinity})
+  end
+
   test "parks when a tool call parks", %{context: context} do
     expect(ReqLLM, :stream_text, fn _, _, _ -> {:ok, calling([call("1", "echo")])} end)
 

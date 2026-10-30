@@ -123,7 +123,7 @@ defmodule WardrikCore do
     * `:events` - where events go. See `WardrikCore.Events`.
     * `:metadata` - anything of yours, passed to middleware. `%{}` unless set.
     * `:timeout` - how long a turn may take, in milliseconds. `:infinity` unless set.
-    * `:max_rounds` - model calls a turn may make. `25` unless set.
+    * `:max_rounds` - model calls a turn may make, or `:infinity`. `25` unless set.
     * `:retries` - how failed calls are retried. See `WardrikCore.Retry`.
     * `:prices` - model prices in US dollars per million tokens, by spec. Takes precedence over
       the model catalog. `%{}` unless set.
