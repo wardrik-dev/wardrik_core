@@ -71,8 +71,7 @@ defmodule WardrikCore.ToolRunner do
 
   defp repeatable?(nil), do: false
 
-  defp repeatable?(tool),
-    do: Tool.annotation(tool, :idempotent, false) or Tool.annotation(tool, :read_only, false)
+  defp repeatable?(tool), do: Tool.repeatable?(tool)
 
   defp attempt(supervisor, context, call, timeout) do
     task = Task.Supervisor.async_nolink(supervisor, fn -> call(context, call) end)

@@ -10,15 +10,15 @@ defmodule WardrikCore.InDoubt do
 
   @spec check(Context.t(), ToolCall.t()) :: :run | Tool.answer()
   def check(%Context{resume: %Resume{reason: :in_doubt, input: input}} = context, call) do
-    if idempotent?(Context.tool(context, call)), do: :run, else: answered(input, call)
+    if repeatable?(Context.tool(context, call)), do: :run, else: answered(input, call)
   end
 
   def check(_context, _call), do: :run
 
   defp resume, do: %Resume{reason: :in_doubt, input: %{}}
 
-  defp idempotent?(nil), do: true
-  defp idempotent?(tool), do: Tool.annotation(tool, :idempotent) == true
+  defp repeatable?(nil), do: true
+  defp repeatable?(tool), do: Tool.repeatable?(tool)
 
   defp answered(input, call) when is_map(input), do: answer(Map.get(input, call.id))
   defp answered(_input, _call), do: answer(nil)

@@ -37,8 +37,8 @@ defmodule WardrikCore.Turn do
 
   @doc """
   Carries on a turn lost while its tools ran, from the checkpoint it saved. Each call may already
-  have run. A call whose tool is `idempotent` is safe to repeat, so it's repeated. Any other parks
-  as `:in_doubt`.
+  have run. A call whose tool is safe to repeat, `read_only` or `idempotent`, is repeated. Any
+  other parks as `:in_doubt`.
   """
   @spec recover(Context.t(), checkpoint()) :: WardrikCore.Middleware.result()
   def recover(

@@ -62,7 +62,8 @@ and the turn carries on.
 ## Annotations
 
 Annotations describe a tool, such as `read_only: true` or `idempotent: true`. Any package can read
-them. A policy can decide by them, and core repeats an idempotent call lost in a crash.
+them. A policy can decide by them, and core repeats a read-only or idempotent call lost in a
+crash.
 
 ```elixir
 tool =

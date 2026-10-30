@@ -42,6 +42,22 @@ defmodule WardrikCore.TurnTest do
     end
   end
 
+  defmodule Lookup do
+    @behaviour WardrikCore.Capability
+
+    @impl true
+    def tools(_context, _opts) do
+      [
+        WardrikCore.Tool.new!(
+          name: "lookup",
+          description: "Looks something up",
+          annotations: [read_only: true],
+          run: fn _args, _context -> {:ok, "found"} end
+        )
+      ]
+    end
+  end
+
   defmodule Stream do
     @behaviour WardrikCore.Middleware
 
@@ -366,6 +382,17 @@ defmodule WardrikCore.TurnTest do
 
       assert {:park, {:tool_calls, [{%{id: "1"}, {:park, :in_doubt}}]}, _context} =
                Turn.recover(context, checkpoint(context, "refund"))
+    end
+
+    test "recover/2 runs a read-only call again", %{context: context} do
+      context = %{context | capabilities: [Lookup]}
+
+      expect(ReqLLM, :stream_text, fn _, messages, _ ->
+        assert %{role: :tool, tool_call_id: "1"} = List.last(messages)
+        {:ok, answer("done")}
+      end)
+
+      assert {:ok, _context} = Turn.recover(context, checkpoint(context, "lookup"))
     end
 
     test "a call in doubt runs again when a person approves", %{context: context} do

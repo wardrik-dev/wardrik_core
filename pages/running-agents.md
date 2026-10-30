@@ -82,7 +82,7 @@ without calling the model again. An agent stopped with `stop/1` stays stopped.
 
 A tool call lost that way may already have run:
 
-* If its tool is annotated `idempotent: true`, the call is repeated.
+* If its tool is annotated `read_only: true` or `idempotent: true`, the call is repeated.
 * Otherwise it parks as `:in_doubt`. Answer it with `resume/3`:
 
 ```elixir

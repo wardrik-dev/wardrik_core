@@ -40,8 +40,7 @@ defmodule WardrikCore.Tool do
 
     * `:read_only` - it changes nothing.
     * `:destructive` - what it changes can't be undone.
-    * `:idempotent` - a call is safe to repeat, such as a payment with an idempotency key. A call
-      lost in a crash is repeated. Without this, it parks as `:in_doubt` until a person answers.
+    * `:idempotent` - a call is safe to repeat, such as a payment with an idempotency key.
     * `:open_world` - it reaches things outside the agent's own systems, such as the web.
     * `:timeout` - how long a call may take, in milliseconds.
     * `:resources` - what a call acts on, as a function of its arguments, such as
@@ -49,6 +48,10 @@ defmodule WardrikCore.Tool do
     * `:labels` - labels every answer carries, such as `["outside"]` for a web search.
 
   The first four are MCP's tool annotations. A tool that doesn't set them has none of them.
+
+  A call to a tool that's `read_only` or `idempotent` is retried when it fails, and repeated when
+  it's lost in a crash. Any other call lost that way parks as `:in_doubt` until a person answers.
+  See `repeatable?/1`.
   """
   use WardrikCore.Private
   alias WardrikCore.Context
@@ -113,6 +116,11 @@ defmodule WardrikCore.Tool do
   @spec annotation(t(), atom(), term()) :: term()
   def annotation(%__MODULE__{annotations: annotations}, key, default \\ nil),
     do: Map.get(annotations, key, default)
+
+  @doc "Returns whether a call to the tool is safe to repeat: it's `read_only` or `idempotent`."
+  @spec repeatable?(t()) :: boolean()
+  def repeatable?(%__MODULE__{} = tool),
+    do: annotation(tool, :read_only) == true or annotation(tool, :idempotent) == true
 
   @doc """
   Runs the tool `call` names, after checking its arguments against the tool's schema.
