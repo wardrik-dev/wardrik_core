@@ -49,29 +49,19 @@ defmodule WardrikCore.Agent do
   def handle_call(:status, _from, state), do: {:reply, state.state, state}
   def handle_call(:stop, _from, state), do: {:stop, :permanent, :ok, state}
 
-  def handle_call({:resume, input, metadata}, _from, %State{state: :waiting} = state) do
-    parked = state.parked
-    resume = %Resume{reason: parked.reason, input: input, metadata: metadata}
+  def handle_call({:resume, input, metadata}, _from, %State{state: :waiting} = state),
+    do: {:reply, :ok, resumed(state, input, metadata)}
 
-    context = %{
-      turn_context(state, parked.messages, parked.span)
-      | metadata: Map.merge(state.context.metadata, parked.metadata),
-        measurements: parked.measurements
-    }
-
-    {:reply, :ok,
-     start_turn(state, :resume, context, %{metadata: metadata}, fn ->
-       Turn.resume(context, resume)
-     end)}
+  def handle_call({:resume, input, metadata}, _from, %State{state: :running} = state) do
+    if answerable?(state, input),
+      do: {:reply, :ok, State.answer_later(state, input, metadata)},
+      else: {:reply, {:error, :not_parked}, state}
   end
 
   def handle_call({:resume, _input, _metadata}, _from, state),
     do: {:reply, {:error, :not_parked}, state}
 
-  def handle_call(:parked, _from, %State{state: :waiting, parked: parked} = state),
-    do: {:reply, parked.reason, state}
-
-  def handle_call(:parked, _from, state), do: {:reply, nil, state}
+  def handle_call(:parked, _from, state), do: {:reply, State.waiting(state), state}
 
   def handle_call({:checkpoint, checkpoint}, {pid, _tag}, %State{task: %Task{pid: pid}} = state) do
     emit(state, [:turn, :checkpoint], %{calls: length(checkpoint.calls)}, %{})
@@ -116,6 +106,17 @@ defmodule WardrikCore.Agent do
     {:noreply, start_turn(state, :run, context, started, fn -> Turn.run(context) end)}
   end
 
+  def handle_continue(
+        :maybe_run,
+        %State{state: :waiting, answers: [{input, metadata} | rest]} = state
+      ) do
+    state = %{state | answers: rest}
+
+    if answerable?(state, input),
+      do: {:noreply, resumed(state, input, metadata), {:continue, :maybe_run}},
+      else: {:noreply, state, {:continue, :maybe_run}}
+  end
+
   def handle_continue(:maybe_run, state), do: {:noreply, state}
 
   @impl true
@@ -154,6 +155,34 @@ defmodule WardrikCore.Agent do
     if state.task, do: Task.shutdown(state.task, :brutal_kill)
     emit(state, [:agent, :stop], %{}, %{reason: reason})
   end
+
+  defp resumed(state, input, metadata) do
+    parked = state.parked
+    resume = %Resume{reason: parked.reason, input: input, metadata: metadata}
+
+    context = %{
+      turn_context(state, parked.messages, parked.span)
+      | metadata: Map.merge(state.context.metadata, parked.metadata),
+        measurements: parked.measurements
+    }
+
+    state
+    |> start_turn(:resume, context, %{metadata: metadata}, fn -> Turn.resume(context, resume) end)
+    |> State.answered(input)
+  end
+
+  defp answerable?(state, input) when is_map(input) and map_size(input) > 0 do
+    case State.waiting(state) do
+      {:tool_calls, waiting} ->
+        ids = for {call, _outcome} <- waiting, do: call.id
+        input |> Map.keys() |> Enum.all?(&(&1 in ids))
+
+      _other ->
+        false
+    end
+  end
+
+  defp answerable?(_state, _input), do: false
 
   defp turn_context(state, messages, span) do
     agent = self()

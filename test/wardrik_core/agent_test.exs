@@ -567,6 +567,40 @@ defmodule WardrikCore.AgentTest do
     assert nil == WardrikCore.parked(agent)
   end
 
+  test "a call the resumed turn still waits on is answered while the turn runs" do
+    Process.register(self(), WardrikCore.AgentTest)
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ ->
+      {:ok, calling([call("1", "block"), call("2", "echo", %{text: "b"})])}
+    end)
+    |> expect(:stream_text, fn _, messages, _ ->
+      assert [_user, _calls, %{content: [%{text: "released"}]}, %{content: [%{text: denied}]}] =
+               messages
+
+      assert denied =~ "Not now."
+      {:ok, answer("done")}
+    end)
+
+    {id, agent} = start_agent(capabilities: [Echo, Blocking], middleware: [ParkTools])
+    WardrikCore.ask(agent, "hi")
+    assert_receive {[:turn, :stop], %{agent_id: ^id, outcome: :park}}
+
+    assert :ok = WardrikCore.resume(agent, %{"1" => :approve})
+    assert_receive {:tool_running, "1", tool}
+
+    assert {:tool_calls, [{%{id: "2"}, {:park, :needs_approval}}]} = WardrikCore.parked(agent)
+    assert :ok = WardrikCore.resume(agent, %{"2" => {:deny, "Not now."}}, %{by: "maria"})
+    assert {:error, :not_parked} = WardrikCore.resume(agent, %{"1" => :approve})
+    assert {:error, :not_parked} = WardrikCore.resume(agent, %{"2" => :approve})
+    assert {:tool_calls, []} = WardrikCore.parked(agent)
+
+    send(tool, :release)
+    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :resume, outcome: :park}}
+    assert_receive {[:turn, :start], %{agent_id: ^id, kind: :resume, metadata: %{by: "maria"}}}
+    assert_receive {[:turn, :stop], %{agent_id: ^id, kind: :resume, outcome: :ok}}
+  end
+
   defp start_agent(opts \\ []) do
     {id, opts} =
       Keyword.pop_lazy(opts, :agent_id, fn -> "agent-#{System.unique_integer([:positive])}" end)

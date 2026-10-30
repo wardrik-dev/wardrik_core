@@ -18,7 +18,9 @@ defmodule WardrikCore.Agent.State do
     messages: [],
     pending_messages: [],
     in_flight: [],
-    calls: %{}
+    calls: %{},
+    answered: [],
+    answers: []
   ]
 
   @persisted [
@@ -98,6 +100,44 @@ defmodule WardrikCore.Agent.State do
         started_at: System.monotonic_time()
     }
 
+  @doc """
+  Returns what the agent waits on, or `nil`. While a resumed turn runs, that's the parked calls
+  not yet answered.
+  """
+  @spec waiting(t()) :: term() | nil
+  def waiting(%__MODULE__{state: :waiting, parked: parked}), do: parked.reason
+
+  def waiting(%__MODULE__{state: :running, parked: %{reason: {:tool_calls, results}}} = state),
+    do:
+      {:tool_calls,
+       for(
+         {call, {:park, _reason}} = result <- results,
+         call.id not in state.answered,
+         do: result
+       )}
+
+  def waiting(%__MODULE__{}), do: nil
+
+  @doc "Notes the calls answered, by `input` and the answers kept, as the turn it resumes starts."
+  @spec answered(t(), term()) :: t()
+  def answered(%__MODULE__{} = state, input),
+    do: %{
+      state
+      | answered: Enum.flat_map([input | Enum.map(state.answers, &elem(&1, 0))], &ids/1)
+    }
+
+  defp ids(input) when is_map(input), do: Map.keys(input)
+  defp ids(_input), do: []
+
+  @doc "Keeps answers to calls the running turn will park on again, to resume it with then."
+  @spec answer_later(t(), map(), map()) :: t()
+  def answer_later(%__MODULE__{} = state, input, metadata),
+    do: %{
+      state
+      | answered: state.answered ++ Map.keys(input),
+        answers: state.answers ++ [{input, metadata}]
+    }
+
   @doc "Keeps a running turn's checkpoint, and the private data it saved."
   @spec checkpointed(t(), map()) :: t()
   def checkpointed(%__MODULE__{} = state, checkpoint),
@@ -113,7 +153,9 @@ defmodule WardrikCore.Agent.State do
         parked: nil,
         checkpoint: nil,
         in_flight: [],
-        messages: context.messages
+        messages: context.messages,
+        answered: [],
+        answers: []
     }
 
   def finished(%__MODULE__{} = state, {:park, reason, context}),
@@ -122,6 +164,7 @@ defmodule WardrikCore.Agent.State do
       | state: :waiting,
         task: nil,
         checkpoint: nil,
+        answered: [],
         parked: %{
           reason: reason,
           messages: context.messages,
@@ -143,7 +186,9 @@ defmodule WardrikCore.Agent.State do
         parked: nil,
         checkpoint: nil,
         in_flight: [],
-        messages: state.messages ++ state.in_flight
+        messages: state.messages ++ state.in_flight,
+        answered: [],
+        answers: []
     }
 
   defp keep_private(state, private), do: put_in(state.context.private, private)

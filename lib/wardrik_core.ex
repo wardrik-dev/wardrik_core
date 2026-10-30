@@ -281,7 +281,8 @@ defmodule WardrikCore do
   @doc """
   Returns why the agent is parked, or `nil` if it isn't.
 
-  Parked tool calls return `{:tool_calls, [{call, outcome}]}`.
+  Parked tool calls return `{:tool_calls, [{call, outcome}]}`. While a resumed turn runs, it's the
+  calls it parked on that aren't answered yet.
   """
   @spec parked(GenServer.server()) :: term() | nil
   def parked(agent), do: GenServer.call(agent, :parked)
@@ -294,6 +295,10 @@ defmodule WardrikCore do
   `metadata` is yours, such as who answered. It's reported on the resumed turn's
   `[:wardrik_core, :turn, :start]` event. Returns `{:error, :not_parked}` if the agent isn't
   parked.
+
+  Parked tool calls may be answered one at a time, as `%{call_id => answer}`. While a resumed turn
+  runs, a call it parked on and isn't answered yet still takes an answer: the turn resumes with it
+  once it parks again.
   """
   @spec resume(GenServer.server(), term(), map()) :: :ok | {:error, :not_parked}
   def resume(agent, input, metadata \\ %{}) when is_map(metadata),
