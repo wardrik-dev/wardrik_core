@@ -1,9 +1,25 @@
 defmodule WardrikCore.Credentials do
   @moduledoc """
-  Gives a tool the credentials it needs, for whoever its turn acts for.
+  Gives tools the credentials of whoever the turn acts for.
 
-  A credentials module resolves a credential by name, for a `WardrikCore.Principal`. Give an agent
-  one as `credentials: {MyApp.Vault, opts}`, and a tool fetches what it needs:
+  Use it when a tool acts as a person, with their own token. For your own API keys, see
+  `WardrikCore.Keys`.
+
+      defmodule MyApp.Vault do
+        @behaviour WardrikCore.Credentials
+
+        @impl true
+        def resolve(_name, nil, _opts), do: {:error, "There's no one to act for."}
+
+        def resolve(name, %WardrikCore.Principal{id: id}, _opts) do
+          case MyApp.Tokens.get(id, name) do
+            %{access_token: token} -> {:ok, token}
+            nil -> {:authorize, "https://app.example.com/connect/\#{name}"}
+          end
+        end
+      end
+
+  Give it to an agent as `credentials: {MyApp.Vault, opts}`. A tool then fetches what it needs:
 
       run: fn %{title: title}, context ->
         with {:ok, token} <- WardrikCore.Credentials.fetch(context, "github") do
@@ -11,28 +27,41 @@ defmodule WardrikCore.Credentials do
         end
       end
 
-  A credential the person hasn't granted yet parks the call on a `WardrikCore.Authorization`. Once
-  they've signed in, resume the turn, and the call runs again.
+  If the person hasn't granted the credential yet, the call parks on a
+  `WardrikCore.Authorization`. Once they've signed in, resume the turn and the call runs again.
 
-  When a service refuses a credential, like with a 401, tell the credentials with `refused/2` and
-  fetch again. A good one gives a fresh credential, or parks the call on a new sign-in.
+  If a service refuses a credential, such as with a 401, call `refused/2` and fetch again. The
+  module should return a fresh credential, or a new sign-in.
 
-  A credential is a value, never kept in the context, so it's never saved or emitted. Keep it out of
+  Credentials are never kept in the context, so they're never saved or emitted. Keep them out of
   private data and attributes too.
 
-  Reach for this when a tool acts as a person, with their own token.
+  See the [Credentials](credentials.html) guide.
   """
   alias WardrikCore.Authorization
   alias WardrikCore.Context
 
+  @doc """
+  Returns the credential `name` for `principal`.
+
+    * `{:ok, secret}` - the credential.
+    * `{:authorize, url}` - the person must sign in at `url` first.
+    * `{:error, reason}` - it can't be given.
+  """
   @callback resolve(name :: String.t(), WardrikCore.Principal.t() | nil, opts :: term()) ::
               {:ok, secret :: term()} | {:authorize, url :: String.t()} | {:error, term()}
 
+  @doc "Called when a service refused the credential `name`. Optional."
   @callback refused(name :: String.t(), WardrikCore.Principal.t() | nil, opts :: term()) :: :ok
 
   @optional_callbacks refused: 3
 
-  @doc "Fetches the credential `name` for whoever the turn acts for. See `Context.acting_for/1`."
+  @doc """
+  Fetches the credential `name` for whoever the turn acts for.
+
+  Returns `{:park, authorization}` if the person must sign in first, and `{:error, reason}` if the
+  agent has no credentials module. See `WardrikCore.Context.acting_for/1`.
+  """
   @spec fetch(Context.t(), String.t()) ::
           {:ok, term()} | {:park, Authorization.t()} | {:error, term()}
   def fetch(%Context{credentials: nil}, name), do: {:error, "No credentials to give #{name}."}
@@ -46,7 +75,7 @@ defmodule WardrikCore.Credentials do
     |> fetched(name, principal)
   end
 
-  @doc "Tells the credentials a service refused the credential `name`, so it isn't given again."
+  @doc "Tells the credentials module that a service refused the credential `name`, so it isn't given again."
   @spec refused(Context.t(), String.t()) :: :ok
   def refused(%Context{credentials: nil}, _name), do: :ok
 

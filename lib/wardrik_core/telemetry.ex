@@ -1,35 +1,45 @@
 defmodule WardrikCore.Telemetry do
   @moduledoc """
-  Events an agent emits, each with `agent_id` in its metadata. Each goes to `:telemetry` and to the
-  agent's `WardrikCore.Events` sink, as a `WardrikCore.Event`:
+  The events an agent emits.
+
+  Each goes to `:telemetry` and to the agent's `WardrikCore.Events` sink, as a
+  `WardrikCore.Event`. Every event's metadata has `agent_id`. Below, each event lists its other
+  metadata, then its measurements.
+
+  ## Events
 
     * `[:wardrik_core, :agent, :start]` - `state`
     * `[:wardrik_core, :agent, :stop]` - `reason`
-    * `[:wardrik_core, :message, :queued]` - `message`, whose metadata holds its `id`; measures
-      `queued`
-    * `[:wardrik_core, :turn, :start]` - `kind`, `span`, the `message_ids` a run answers, and the
-      `metadata` given to `resume/3`
-    * `[:wardrik_core, :turn, :stop]` - `kind`, `span`, `outcome`, the `messages` an answered turn
-      added, the `reason` a parked turn gives `parked/1` or a failed one failed with, and how many messages an interrupted or
-      timed-out turn `kept` and `dropped`; measures `duration`
-    * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`
+    * `[:wardrik_core, :message, :queued]` - `message`, with its `id` in its metadata. Measures
+      `queued`.
     * `[:wardrik_core, :message, :delta]` - `span`, `kind` (`:content` or `:thinking`), and the
-      `text` the model streamed
-    * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`
-    * `[:wardrik_core, :step, :start]` - `step`, `span`, and the `model` a `:generate` step calls
-    * `[:wardrik_core, :step, :stop]` - `step`, `span`, `status`, `attributes`, and the `response`
-      or `reason`; measures `duration` and what the step measured
-    * `[:wardrik_core, :step, :exception]` - `step`, `span`, `kind`, `reason`, `stacktrace`
-    * `[:wardrik_core, :subagent, :started]` - `span`, `agent`, `prompt`
-    * `[:wardrik_core, :subagent, :progress]` - `span`, `agent`, `call`, `tool_calls`, as it
-      begins each tool call
-    * `[:wardrik_core, :subagent, :completed]` - `span`, `agent`, `message`, `duration_ms`,
-      `tool_calls`, `measurements`
-    * `[:wardrik_core, :subagent, :failed]` - `span`, `agent`, `error`, `duration_ms`,
-      `tool_calls`, `measurements`
+      streamed `text`.
+    * `[:wardrik_core, :turn, :start]` - `kind`, `span`, the `message_ids` the turn answers, and
+      the `metadata` given to `WardrikCore.resume/3`.
+    * `[:wardrik_core, :turn, :stop]` - `kind`, `span`, `outcome`, and:
+      * `messages` - the messages an answered turn added.
+      * `reason` - why a turn parked (as `WardrikCore.parked/1` returns) or failed.
+      * `kept` and `dropped` - message counts for an interrupted or timed-out turn.
 
-  A turn's `span` is the root of its trace, and it keeps it through a park or a restart. Each step
-  runs in a child of it; see `WardrikCore.Span`.
+      Measures `duration`.
+    * `[:wardrik_core, :turn, :checkpoint]` - measures `calls`.
+    * `[:wardrik_core, :tool_call, :exit]` - `call`, `reason`.
+    * `[:wardrik_core, :step, :start]` - `step`, `span`, and `model` for a `:generate` step.
+    * `[:wardrik_core, :step, :stop]` - `step`, `span`, `status`, `attributes`, and `response` or
+      `reason`. Measures `duration` and what the step measured.
+    * `[:wardrik_core, :step, :exception]` - `step`, `span`, `kind`, `reason`, `stacktrace`.
+    * `[:wardrik_core, :subagent, :started]` - `span`, `agent`, `prompt`.
+    * `[:wardrik_core, :subagent, :progress]` - `span`, `agent`, `call`, `tool_calls`. Emitted as
+      each tool call begins.
+    * `[:wardrik_core, :subagent, :completed]` - `span`, `agent`, `message`, `duration_ms`,
+      `tool_calls`, `measurements`.
+    * `[:wardrik_core, :subagent, :failed]` - `span`, `agent`, `error`, `duration_ms`,
+      `tool_calls`, `measurements`.
+
+  ## Spans
+
+  A turn's `span` is the root of its trace. It keeps the same span through a park or a restart.
+  Each step runs in a child span. See `WardrikCore.Span`.
   """
 
   alias WardrikCore.Context

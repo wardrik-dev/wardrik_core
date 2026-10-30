@@ -1,5 +1,10 @@
 defmodule WardrikCore.Resume do
-  @moduledoc "A resume is what a parked step sees when it runs again: why it parked, the input it was given, and the caller's metadata."
+  @moduledoc """
+  What a parked step sees when it runs again.
+
+  Holds the `reason` it parked, the `input` passed to `WardrikCore.resume/3`, and that call's
+  `metadata`.
+  """
 
   @enforce_keys [:reason, :input]
   defstruct [:reason, :input, metadata: %{}]

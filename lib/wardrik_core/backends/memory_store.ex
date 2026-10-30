@@ -13,7 +13,7 @@ defmodule WardrikCore.Backends.MemoryStore do
 
   @behaviour DurableServer.StorageBackend
 
-  @doc "Starts the store that holds the agents. Takes a `:name`."
+  @doc "Starts the store. Takes a required `:name`."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)

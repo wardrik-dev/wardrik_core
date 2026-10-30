@@ -1,5 +1,5 @@
 defmodule WardrikCore.ToolCall do
-  @moduledoc "A tool call the model asked for, with its arguments as the model wrote them."
+  @moduledoc "A tool call the model asked for, with the arguments the model wrote."
 
   @enforce_keys [:id, :name]
   defstruct [:id, :name, arguments: %{}]

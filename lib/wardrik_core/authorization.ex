@@ -1,9 +1,9 @@
 defmodule WardrikCore.Authorization do
   @moduledoc """
-  An authorization is a sign-in a person must finish before a call can run.
+  A sign-in a person must finish before a call can run.
 
-  A call parks on one when `WardrikCore.Credentials.fetch/2` can't give it a credential yet. Show
-  the person its `url`. Once they've signed in, resume the turn, and the call runs again.
+  A call parks on one when `WardrikCore.Credentials.fetch/2` has no credential yet. Show the person
+  its `url`. Once they've signed in, resume the turn and the call runs again.
   """
 
   @enforce_keys [:url, :credential]

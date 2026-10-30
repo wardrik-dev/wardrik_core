@@ -2,37 +2,53 @@ defmodule WardrikCore.Tool do
   @moduledoc """
   A tool an agent may call.
 
-  `run` answers `{:ok, answer}` or `{:error, reason}`. To report on its step, like what a paid API
-  cost, it answers with the context it was given, changed:
+      WardrikCore.Tool.new!(
+        name: "order_status",
+        description: "Say where an order is.",
+        schema: [order_id: [type: :string, required: true]],
+        run: fn %{order_id: id}, _context -> {:ok, MyApp.Orders.status(id)} end,
+        annotations: [read_only: true]
+      )
+
+  ## Return values
+
+  `run` takes the checked arguments and the `WardrikCore.Context`, and returns:
+
+    * `{:ok, answer}` or `{:error, reason}`.
+    * `{:ok, answer, context}` or `{:error, reason, context}` - with the context changed, to
+      report on the step. A call that failed after paying returns the error form.
+    * `{:park, reason}` - waits for a person.
+
+  For example, to report what a paid API cost:
 
       run: fn %{email: email}, context ->
         found = Enrich.lookup(email)
-        {:ok, found, Context.measure(context, :usd, 0.01)}
+        {:ok, found, WardrikCore.Context.measure(context, :usd, 0.01)}
       end
 
-  A call that failed after paying answers `{:error, reason, context}`. See `WardrikCore.Context`.
+  ## Labels
 
-  An answer that holds what a label names, such as `"outside"` for text nobody on the agent's side
-  wrote, says so in its metadata, and its run carries the label from then on; see
-  `WardrikCore.Context.labels/1`:
+  An answer can carry labels in its metadata, such as `"outside"` for text nobody on the agent's
+  side wrote. The run carries the label from then on. See `WardrikCore.Context.labels/1`.
 
       {:ok, %ReqLLM.ToolResult{output: page, metadata: %{labels: ["outside"]}}}
 
-  Annotations are facts about a tool that any package can read. Give them as `annotations:`, or
-  with `annotate/2`:
+  ## Annotations
 
-    * `:read_only`, it changes nothing.
-    * `:destructive`, what it changes can't be put back.
-    * `:idempotent`, a call is safe to repeat. Repeating it leaves things as running it once did,
-      like a payment sent with an idempotency key. A call lost in a crash is repeated. Without
-      this, it parks as `:in_doubt` until a person answers.
-    * `:open_world`, it reaches things outside the agent's own systems, like the web.
-    * `:timeout`, how long a call may take, in milliseconds.
-    * `:resources`, what a call acts on, as a function of its arguments, like
+  Facts about a tool that any package can read. Give them as `:annotations` to `new!/1`, or with
+  `annotate/2`.
+
+    * `:read_only` - it changes nothing.
+    * `:destructive` - what it changes can't be undone.
+    * `:idempotent` - a call is safe to repeat, such as a payment with an idempotency key. A call
+      lost in a crash is repeated. Without this, it parks as `:in_doubt` until a person answers.
+    * `:open_world` - it reaches things outside the agent's own systems, such as the web.
+    * `:timeout` - how long a call may take, in milliseconds.
+    * `:resources` - what a call acts on, as a function of its arguments, such as
       `fn args -> [args["path"]] end`.
-    * `:labels`, what every answer holds, as `["outside"]` for a web search.
+    * `:labels` - labels every answer carries, such as `["outside"]` for a web search.
 
-  The first four are MCP's tool annotations. A tool that doesn't say has none of them.
+  The first four are MCP's tool annotations. A tool that doesn't set them has none of them.
   """
   use WardrikCore.Private
   alias WardrikCore.Context
@@ -58,6 +74,20 @@ defmodule WardrikCore.Tool do
   @enforce_keys [:name, :description, :run, :req_llm]
   defstruct [:name, :description, :run, :req_llm, schema: [], annotations: %{}, private: %{}]
 
+  @doc """
+  Builds a tool.
+
+  ## Options
+
+    * `:name` - required.
+    * `:description` - required. What the model reads to decide when to call it.
+    * `:run` - required. A 2-arity function of the arguments and the context.
+    * `:schema` - the arguments, as a NimbleOptions-style keyword list or a JSON Schema map.
+      `[]` unless set.
+    * `:annotations` - see above.
+
+  Raises if a required option is missing.
+  """
   @spec new!(keyword()) :: t()
   def new!(opts) do
     {annotations, opts} = Keyword.pop(opts, :annotations, [])
@@ -74,17 +104,21 @@ defmodule WardrikCore.Tool do
     %{tool | req_llm: req_llm}
   end
 
-  @doc "Adds `annotations` to the tool, like `read_only: true`. A later one replaces an earlier."
+  @doc "Adds `annotations`, such as `read_only: true`. Replaces any with the same key."
   @spec annotate(t(), keyword() | map()) :: t()
   def annotate(%__MODULE__{annotations: annotations} = tool, new),
     do: %{tool | annotations: Map.merge(annotations, Map.new(new))}
 
-  @doc "Gets an annotation, or `default` when the tool doesn't say."
+  @doc "Returns the annotation `key`, or `default` if the tool doesn't set it."
   @spec annotation(t(), atom(), term()) :: term()
   def annotation(%__MODULE__{annotations: annotations}, key, default \\ nil),
     do: Map.get(annotations, key, default)
 
-  @doc "Runs the tool a call names, with its arguments checked against the tool's schema."
+  @doc """
+  Runs the tool `call` names, after checking its arguments against the tool's schema.
+
+  Returns `{:error, reason}` if no tool has that name or the arguments don't match.
+  """
   @spec call([t()], ToolCall.t(), Context.t()) :: answer()
   def call(tools, %ToolCall{} = call, %Context{} = context) do
     with %__MODULE__{} = tool <-

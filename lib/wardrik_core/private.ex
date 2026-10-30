@@ -3,17 +3,17 @@ defmodule WardrikCore.Private do
 
   defmacro __using__(_opts) do
     quote do
-      @doc "Puts `value` in the private data under `key`. Use your package's module as the key."
+      @doc "Puts `value` in the private data under `key`. Use your own module as the key."
       @spec put_private(t(), term(), term()) :: t()
       def put_private(%__MODULE__{} = struct, key, value),
         do: WardrikCore.Private.put(struct, key, value)
 
-      @doc "Gets the value under `key` from the private data, or `default`."
+      @doc "Returns the private value under `key`, or `default`."
       @spec get_private(t(), term(), term()) :: term()
       def get_private(%__MODULE__{} = struct, key, default \\ nil),
         do: WardrikCore.Private.get(struct, key, default)
 
-      @doc "Updates the value under `key` with `fun`. Sets `default` if there's nothing there yet."
+      @doc "Updates the private value under `key` with `fun`. Puts `default` if there's none yet."
       @spec update_private(t(), term(), term(), (term() -> term())) :: t()
       def update_private(%__MODULE__{} = struct, key, default, fun),
         do: WardrikCore.Private.update(struct, key, default, fun)

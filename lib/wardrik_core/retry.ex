@@ -1,25 +1,40 @@
 defmodule WardrikCore.Retry do
   @moduledoc """
-  How a turn tries again what failed in passing, so every model call and every tool call that may
-  run twice is fault tolerant without a line of its own.
+  Retries model calls and tool calls that fail in a way a retry may fix.
 
-  It waits a random while before each try: up to a second, then two, then four, and so on, never
-  more than `:max_wait`. An agent's `:retries` set `:attempts`, the tries after the first, 6 unless
-  set, `:max_wait`, in milliseconds, a minute unless set, and `:on_exhausted`, what a model call
-  does once they're spent: `:ask` a person to try again, unless set, or `:fail`.
+      WardrikCore.start_agent(
+        agent_id: "triage",
+        model: "anthropic:claude-haiku-4-5",
+        retries: [attempts: 3, max_wait: :timer.seconds(10), on_exhausted: :fail]
+      )
 
-  A model call is tried again when it failed with an exception, as a timeout, a dropped stream, a
-  rate limit or a 5xx do, but not on a 4xx other than 408, 425 and 429, nor when a middleware
-  refused it. A tool call is tried again when its tool says it's `idempotent` or `read_only` and it
-  raised, crashed or ran out of time: a tool answers `{:error, reason}` for what trying again won't
-  change, and lets what might crash.
+  Before each retry it waits a random time of up to 1 second, then up to 2, then 4, and so on,
+  capped at `:max_wait`.
+
+  ## Options
+
+    * `:attempts` - retries after the first try. `6` unless set.
+    * `:max_wait` - the longest wait, in milliseconds. `60_000` unless set.
+    * `:on_exhausted` - what a model call does once retries run out. `:ask` waits for a person to
+      say whether to try again (see `WardrikCore.Retry.Exhausted`). `:fail` fails the turn. `:ask`
+      unless set.
+
+  ## What's retried
+
+    * A model call that raised, such as on a timeout, a dropped stream, a rate limit or a 5xx.
+      Not a 4xx other than 408, 425 and 429, and not a call middleware refused.
+    * A tool call that raised, crashed or timed out, if its tool is `idempotent` or `read_only`.
+
+  So a tool should return `{:error, reason}` for failures a retry won't fix, and raise for those
+  it might.
   """
 
   defmodule Exhausted do
     @moduledoc """
-    What a turn waits on once a model call's tries are spent: a person to say whether to try again.
-    Resume it with `%{"model" => :approve}` to try again with a fresh set, or `{:deny, reason}` to
-    fail the turn.
+    Why a turn parks once a model call's retries run out.
+
+    Resume with `%{"model" => :approve}` to try again with fresh retries, or
+    `%{"model" => {:deny, reason}}` to fail the turn.
     """
 
     @enforce_keys [:message]
@@ -32,13 +47,14 @@ defmodule WardrikCore.Retry do
   @max_wait :timer.minutes(1)
   @hopeless [400, 401, 402, 403, 404, 405, 406, 409, 410, 411, 412, 413, 414, 415, 422]
 
-  @typedoc "An agent's retries: `:attempts`, `:max_wait` in milliseconds, and `:on_exhausted`."
+  @typedoc "An agent's `:retries`. See the options above."
   @type t() :: keyword()
 
   @doc """
-  Runs `fun`, and runs it again while `transient` says what it answered failed in passing, as
-  `announce` hears before each wait. Returns `{:ok, answer}`, or `{:spent, answer, tries}` once the
-  tries ran out.
+  Runs `fun`, retrying while `transient` returns a reason for its answer.
+
+  `transient` returns `nil` for an answer that shouldn't be retried. `announce` is called before
+  each wait. Returns `{:ok, answer}`, or `{:spent, answer, tries}` once retries run out.
   """
   @spec run(t(), (-> answer), (answer -> term() | nil), (map() -> any())) ::
           {:ok, answer} | {:spent, answer, pos_integer()}
@@ -46,15 +62,15 @@ defmodule WardrikCore.Retry do
   def run(retries, fun, transient, announce),
     do: tried(settings(retries), fun, transient, announce, 1)
 
-  @doc "Says how many tries `retries` allow after the first."
+  @doc "Returns the number of retries after the first try."
   @spec attempts(t()) :: non_neg_integer()
   def attempts(retries), do: Keyword.get(retries, :attempts, @attempts)
 
-  @doc "Says what a model call does once `retries` are spent: `:ask` or `:fail`."
+  @doc "Returns what a model call does once retries run out: `:ask` or `:fail`."
   @spec on_exhausted(t()) :: :ask | :fail
   def on_exhausted(retries), do: Keyword.get(retries, :on_exhausted, :ask)
 
-  @doc "Says whether a model call that failed with `reason` may succeed if tried again."
+  @doc "Returns whether a model call that failed with `reason` may succeed on retry."
   @spec transient?(term()) :: boolean()
   def transient?(%{status: status}) when status in @hopeless, do: false
   def transient?(%{__exception__: true}), do: true

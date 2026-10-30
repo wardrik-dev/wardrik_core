@@ -1,6 +1,6 @@
 # Tools
 
-A capability is a module that hands an agent its tools:
+A capability is a module that gives an agent its tools:
 
 ```elixir
 defmodule MyApp.Orders do
@@ -29,13 +29,32 @@ end
 :ok = WardrikCore.ask(agent, "Where is order 1001?")
 ```
 
-The orders arrive as the capability's options, `{MyApp.Orders, opts}`, so one module serves
-many agents. Each tool call runs in its own process: one that crashes or times out is answered with
-an error, and the turn carries on.
+The orders are the capability's options, from `{MyApp.Orders, opts}`, so one module can serve many
+agents.
 
-A tool says what it is with annotations, like `read_only: true` or `idempotent: true`. Any package
-can read them. A policy decides by them, and core repeats an idempotent call lost in a crash. A tool
-that calls a paid API reports what it cost by answering with its context, measured:
+Each tool call runs in its own process. A call that crashes or times out is answered with an error,
+and the turn carries on.
+
+## Annotations
+
+Annotations describe a tool, such as `read_only: true` or `idempotent: true`. Any package can read
+them. A policy can decide by them, and core repeats an idempotent call lost in a crash.
+
+```elixir
+WardrikCore.Tool.new!(
+  name: "order_status",
+  description: "Say where an order is.",
+  schema: [order_id: [type: :string, required: true]],
+  run: fn %{order_id: id}, _context -> {:ok, MyApp.Orders.status(id)} end,
+  annotations: [read_only: true, idempotent: true]
+)
+```
+
+See `WardrikCore.Tool` for every annotation and return value.
+
+## Reporting cost
+
+A tool that calls a paid API reports the cost by returning its context, measured:
 
 ```elixir
 run: fn %{email: email}, context ->
@@ -43,5 +62,3 @@ run: fn %{email: email}, context ->
   {:ok, found, WardrikCore.Context.measure(context, :usd, 0.01)}
 end
 ```
-
-`WardrikCore.Tool` lists the annotations, and what a tool can answer.

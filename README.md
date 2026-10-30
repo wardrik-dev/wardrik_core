@@ -10,14 +10,15 @@ person when they should, and run every call through your code.
 ```elixir
 def deps do
   [
-    {:wardrik_core, "~> 0.1"}
+    {:wardrik_core, "~> 0.1.0-rc.1"}
   ]
 end
 ```
 
 ## Start an agent
 
-Let's run agents in your app. To begin, keep them in memory:
+Start `WardrikCore` with a backend, then start an agent and send it a message. This keeps agents
+in memory:
 
 ```elixir
 children = [
@@ -31,8 +32,8 @@ Supervisor.start_link(children, strategy: :rest_for_one)
 :ok = WardrikCore.ask(agent, "What's on fire?")
 ```
 
-Agents in memory are gone when the node stops. To keep them through a restart, give `WardrikCore`
-a backend that stores them, like a disk or an S3 bucket. See
+Agents in memory are gone when the node stops. To keep them through a restart, use a backend that
+stores them, such as a disk or an S3 bucket. See
 [Where agents are kept](pages/running-agents.md#where-agents-are-kept).
 
 ## Guides
@@ -46,18 +47,17 @@ a backend that stores them, like a disk or an S3 bucket. See
 - [Tracing](pages/tracing.md): spans, attributes, and measurements.
 - [Events](pages/events.md): following what an agent does, from a CLI, a TUI or a web page.
 
-## What core does, and doesn't
+## Scope
 
 Core runs agents durably, and gives packages seams to extend them.
 
-- **It runs agents:** turns, tools, checkpoints, parking and resuming, and carrying on after a
-  crash.
-- **It gives seams:** capabilities, middleware, tool annotations, principals, credentials, keys,
-  and events.
-- **It leaves the rest to packages:** policy, MCP servers, storing secrets, OAuth, event logs,
-  transports like HTTP, and clients.
+- **Runs agents:** turns, tools, checkpoints, parking and resuming, and recovery after a crash.
+- **Gives seams:** capabilities, middleware, tool annotations, principals, credentials, keys and
+  events.
+- **Leaves the rest to packages:** policy, MCP servers, secret storage, OAuth, event logs,
+  transports such as HTTP, and clients.
 
-Core changes for bugs, and for a seam no package can do without.
+Core changes only for bugs, and for seams no package can do without.
 
 ## License
 

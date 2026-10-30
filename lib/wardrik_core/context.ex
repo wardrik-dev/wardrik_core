@@ -1,6 +1,10 @@
 defmodule WardrikCore.Context do
   @moduledoc """
-  The token threaded through a turn's middleware.
+  The state passed through a turn's middleware.
+
+  `step` says which step is running: `:turn`, `:generate` (a model call), `{:tool_call, call}`, or
+  `{:step, name}` for your own. Middleware reads and changes the rest, such as `messages`,
+  `response` and `attributes`.
   """
   use WardrikCore.Private
 
@@ -71,7 +75,7 @@ defmodule WardrikCore.Context do
     struct!(__MODULE__, opts)
   end
 
-  @doc "Runs `fun` through the context's middleware. The first middleware in the list runs first."
+  @doc "Runs `fun` through the context's middleware. The first in the list runs outermost."
   @spec run(t(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
   def run(%__MODULE__{middleware: middleware} = context, fun) do
     middleware
@@ -84,26 +88,32 @@ defmodule WardrikCore.Context do
   end
 
   @doc """
-  Sets an attribute on the current step, as OpenTelemetry sets one on a span. Name it as
-  OpenTelemetry would, like `"gen_ai.tool.name"`, or under your own prefix.
+  Sets an attribute on the current step, like an OpenTelemetry span attribute.
+
+      Context.attribute(context, "gen_ai.tool.name", call.name)
+
+  Use OpenTelemetry's names, or your own prefix.
   """
   @spec attribute(t(), String.t() | atom(), term()) :: t()
   def attribute(%__MODULE__{attributes: attributes} = context, key, value),
     do: %{context | attributes: Map.put(attributes, key, value)}
 
   @doc """
-  Adds `amount` to a measurement, like tokens or dollars spent.
+  Adds `amount` to the measurement `key`, such as tokens or dollars spent.
 
-  Measurements add up over the turn, and each step reports its own share when it ends. Core
-  measures each model call's `input_tokens` and `output_tokens`, and its `usd` when the model has a
-  price in dollars, in the agent's `prices` or else the model catalog. A call to a model without one
-  counts in `unpriced_calls`.
+      Context.measure(context, :usd, 0.01)
+
+  Measurements add up over the turn. Each step reports its own share when it ends.
+
+  Core measures each model call's `input_tokens` and `output_tokens`. It also measures `usd` if
+  the model has a price in the agent's `prices` or the model catalog. Otherwise it counts the call
+  in `unpriced_calls`.
   """
   @spec measure(t(), term(), number()) :: t()
   def measure(%__MODULE__{measurements: measurements} = context, key, amount),
     do: %{context | measurements: Map.update(measurements, key, amount, &(&1 + amount))}
 
-  @doc "Adds each of `measurements`, like those `WardrikCore.evaluate/4` gives."
+  @doc "Adds each of `measurements`, such as those `WardrikCore.evaluate/4` returns."
   @spec measure(t(), map()) :: t()
   def measure(%__MODULE__{} = context, measurements) do
     Enum.reduce(measurements, context, fn {key, amount}, context ->
@@ -112,8 +122,10 @@ defmodule WardrikCore.Context do
   end
 
   @doc """
-  Gives who the turn acts for: the principal who sent its latest message, else the agent's own,
-  else `nil`.
+  Returns who the turn acts for.
+
+  That's the principal who sent the latest message. If it has none, it's the agent's own
+  principal, or `nil`.
   """
   @spec acting_for(t()) :: WardrikCore.Principal.t() | nil
   def acting_for(%__MODULE__{messages: messages, principal: principal}) do
@@ -127,12 +139,13 @@ defmodule WardrikCore.Context do
   defp asked_by(_message, agent), do: agent
 
   @doc """
-  Gives the labels of what the turn has read, or of what `messages` hold: each one in their
-  metadata, once, in order. A label stays with the history it came in, until the history is cleared.
+  Returns the labels in the turn's messages, or in `messages`, sorted and without duplicates.
 
-  Core carries labels and decides nothing from them. `"outside"` is content nobody on the agent's
-  side wrote, such as a web page or an issue a stranger filed: it may be what asks for the next
-  call.
+  A label stays with the history it came in until the history is cleared. Core carries labels but
+  decides nothing from them.
+
+  `"outside"` marks content nobody on the agent's side wrote, such as a web page or an issue a
+  stranger filed. Such content may be what asks for the next call.
   """
   @spec labels(t() | [ReqLLM.Message.t()]) :: [String.t()]
   def labels(%__MODULE__{messages: messages}), do: labels(messages)
@@ -143,20 +156,22 @@ defmodule WardrikCore.Context do
   defp message_labels(%{metadata: %{labels: labels}}), do: labels
   defp message_labels(_message), do: []
 
-  @doc "Finds the tool a call names, or returns `nil`."
+  @doc "Returns the tool `call` names, or `nil`."
   @spec tool(t(), WardrikCore.ToolCall.t()) :: WardrikCore.Tool.t() | nil
   def tool(%__MODULE__{tools: tools}, %WardrikCore.ToolCall{name: name}),
     do: Enum.find(tools, &(&1.name == name))
 
-  @doc "Turns a capability or middleware entry into `{module, opts}`."
+  @doc "Returns a capability or middleware entry as `{module, opts}`. A bare module gets `[]`."
   @spec entry(entry()) :: {module(), term()}
   def entry({module, opts}) when is_atom(module), do: {module, opts}
   def entry(module) when is_atom(module), do: {module, []}
 
   @doc """
-  Runs `fun` through the middleware as `step`, in a span of its own, then puts the outer step back.
+  Runs `fun` through the middleware as `step`, in a span of its own. Then restores the outer step.
 
-  Name a step of your own `{:step, name}`, like `{:step, "summarize"}`.
+      Context.run(context, {:step, "summarize"}, &summarize/1)
+
+  Name your own steps `{:step, name}`.
   """
   @spec run(t(), step(), WardrikCore.Middleware.next()) :: WardrikCore.Middleware.result()
   def run(%__MODULE__{} = context, step, fun) do

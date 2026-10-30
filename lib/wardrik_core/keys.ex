@@ -1,31 +1,44 @@
 defmodule WardrikCore.Keys do
   @moduledoc """
-  Gives the code you install the keys it calls services with, like a model provider's or a search
-  API's, for whoever the agent works for.
+  Gives your code the API keys it calls services with, such as a model provider's or a search
+  API's.
 
-  A keys module fetches a key by name, for the agent's `WardrikCore.Principal`. Give an agent one as
-  `keys: {MyApp.Keys, opts}`, and a capability or middleware fetches what it needs:
+      defmodule MyApp.Keys do
+        @behaviour WardrikCore.Keys
+
+        @impl true
+        def fetch(name, principal, _opts), do: MyApp.Vault.key(principal, name)
+      end
+
+  Give it to an agent as `keys: {MyApp.Keys, opts}`. Keys are fetched by name, for the agent's
+  `WardrikCore.Principal`, so an org can bring its own. A capability or middleware fetches what it
+  needs:
 
       with {:ok, key} <- WardrikCore.Keys.fetch(context, "BRAVE_API_KEY") do
         Brave.search(key, query)
       end
 
-  Every model call fetches its provider's key too, by the name ReqLLM gives it, as
-  `ANTHROPIC_API_KEY`, and passes it to that call alone. Where there's no keys module, or it holds no
-  such key, ReqLLM finds one itself, in its config or the environment.
+  ## Model calls
 
-  Keys are for the code you install. A tool that acts for someone takes their credentials instead,
-  from `WardrikCore.Credentials`, so what an agent's owner configures never reads a key of yours.
+  Every model call fetches its provider's key by the name ReqLLM gives it, such as
+  `ANTHROPIC_API_KEY`, and passes it to that call only. If there's no keys module, or it has no
+  such key, ReqLLM finds one in its config or the environment.
 
-  A key is a value, never kept in the context, so it's never saved or emitted.
+  ## Keys and credentials
+
+  Keys are for the code you install. A tool that acts for a person uses their credentials instead,
+  from `WardrikCore.Credentials`. That way nothing an agent's owner configures can read your keys.
+
+  Keys are never kept in the context, so they're never saved or emitted.
   """
 
   alias WardrikCore.Context
 
+  @doc "Returns the key `name` for `principal`, or `:error` if there's none."
   @callback fetch(name :: String.t(), WardrikCore.Principal.t() | nil, opts :: term()) ::
               {:ok, String.t()} | :error
 
-  @doc "Fetches the key `name` for whoever the agent works for, or `:error` where none is held."
+  @doc "Fetches the key `name` for the agent's principal. Returns `:error` if there's none."
   @spec fetch(Context.t(), String.t()) :: {:ok, String.t()} | :error
   def fetch(%Context{keys: nil}, _name), do: :error
 
@@ -35,7 +48,7 @@ defmodule WardrikCore.Keys do
   def fetch(%Context{keys: module, principal: principal}, name),
     do: module.fetch(name, principal, [])
 
-  @doc "Returns the options a call to `model` takes its provider's key in, `[api_key: key]`, or none."
+  @doc "Returns `[api_key: key]` for `model`'s provider, or `[]` if there's no key."
   @spec model_options(Context.t(), LLMDB.Model.t() | String.t()) :: keyword()
   def model_options(%Context{keys: nil}, _model), do: []
 
@@ -48,7 +61,12 @@ defmodule WardrikCore.Keys do
     end
   end
 
-  @doc "Returns the name of the key `model`'s provider takes, as `ZAI_API_KEY`, or `nil`."
+  @doc """
+  Returns the name of the key `model`'s provider takes, or `nil`.
+
+      WardrikCore.Keys.key_name("zai:glm-5.1")
+      #=> "ZAI_API_KEY"
+  """
   @spec key_name(LLMDB.Model.t() | String.t()) :: String.t() | nil
   def key_name(%{provider: provider}) when is_atom(provider), do: env_key(provider)
 

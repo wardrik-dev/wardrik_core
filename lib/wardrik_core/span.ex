@@ -1,5 +1,9 @@
 defmodule WardrikCore.Span do
-  @moduledoc "A span of a turn's trace. Each step of a turn runs in a child of the turn's span."
+  @moduledoc """
+  A span in a turn's trace.
+
+  A turn is the root span. Each of its steps runs in a child span.
+  """
 
   @enforce_keys [:id, :trace]
   defstruct [:id, :trace, :parent]
@@ -11,14 +15,21 @@ defmodule WardrikCore.Span do
   def root, do: %__MODULE__{id: random(8), trace: random(16)}
 
   @doc """
-  Starts a span beneath `parent`. With a `:key`, it's the same span each time, like a tool call
-  that runs again after a restart.
+  Starts a span beneath `parent`.
+
+  With `:key`, the span's id is derived from the trace and the key, so it's the same each time.
+  A tool call that runs again after a restart keeps its span this way.
   """
   @spec child(t(), keyword()) :: t()
   def child(%__MODULE__{} = parent, opts \\ []),
     do: %__MODULE__{id: id(parent, opts[:key]), trace: parent.trace, parent: parent.id}
 
-  @doc "The span as a W3C `traceparent` header, as OpenTelemetry reads it."
+  @doc """
+  Returns the span as a W3C `traceparent` header, for OpenTelemetry.
+
+      WardrikCore.Span.traceparent(span)
+      #=> "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  """
   @spec traceparent(t()) :: String.t()
   def traceparent(%__MODULE__{} = span), do: "00-#{span.trace}-#{span.id}-01"
 

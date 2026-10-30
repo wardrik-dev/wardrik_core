@@ -1,7 +1,7 @@
 defmodule WardrikCore do
   @moduledoc """
-  A durable agent runtime: agents that survive a crash, wait for a person, and run every call
-  through your code.
+  A durable agent runtime. Agents survive a crash, wait for a person, and run every call through
+  your code.
 
       children = [
         {WardrikCore.Backends.MemoryStore, name: :agents},
@@ -16,16 +16,21 @@ defmodule WardrikCore do
       :ok = WardrikCore.ask(agent, "What's on fire?")
       WardrikCore.history(agent)
 
-  `ask/3` returns once the message is stored. Agents kept in memory, as here, are gone when the
-  node stops. With a backend that keeps them, like a disk or an S3 bucket, an agent whose node dies
-  mid-turn picks the message back up when it starts again. The
-  [Run agents](running-agents.html#where-agents-are-kept) guide lists the backends.
+  `ask/3` returns once the message is stored. Agents in memory, as here, are gone when the node
+  stops. With a backend that keeps them, such as a disk or an S3 bucket, an agent whose node dies
+  mid-turn picks the message back up when it restarts. See
+  [Run agents](running-agents.html#where-agents-are-kept) for the backends.
 
-  An agent runs one turn at a time. A message that arrives mid-turn ends that turn at its next
+  ## Turns
+
+  An agent runs one turn at a time. A message that arrives mid-turn ends the turn at its next
   step, and the next turn answers it. Tools come from `WardrikCore.Capability` modules. Every
   model call and tool call runs through `WardrikCore.Middleware`.
 
-  To run more than one instance, give the child a `name:` and pass it as the first argument.
+  ## Instances
+
+  To run more than one instance, give each child a `:name`. Pass that name as the first argument
+  to the functions that take an `instance`.
   """
 
   alias WardrikCore.Agent.State
@@ -33,10 +38,20 @@ defmodule WardrikCore do
   alias WardrikCore.Turn
 
   @doc """
-  Runs agents under your supervision tree. Takes `:backend`, `:name` and `DurableServer.Supervisor`'s
-  options. It loads every module of `wardrik_core`, `req_llm` and each app built on
-  `wardrik_core` first, so a backend that decodes saved agents with `[:safe]` knows every struct
-  they name.
+  Runs agents under your supervision tree.
+
+      {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
+
+  Before starting, it loads every module of `wardrik_core`, `req_llm` and each app that depends
+  on `wardrik_core`. That way a backend that decodes saved agents with `[:safe]` knows every
+  struct they name.
+
+  ## Options
+
+    * `:backend` - required. The durable_server backend agents are saved in.
+    * `:name` - the instance's name. `WardrikCore` unless set.
+
+  Any other option is passed to `DurableServer.Supervisor`.
   """
   def child_spec(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -84,7 +99,37 @@ defmodule WardrikCore do
     :prices
   ]
 
-  @doc "Starts an agent, or loads it if it was saved before."
+  @doc """
+  Starts an agent, or loads it if it was saved before.
+
+      {:ok, agent} =
+        WardrikCore.start_agent(
+          agent_id: "support",
+          model: "anthropic:claude-haiku-4-5",
+          instructions: "Answer customers' questions about their orders.",
+          capabilities: [{MyApp.Orders, []}]
+        )
+
+  ## Options
+
+    * `:agent_id` - required. The agent's id, unique within the instance.
+    * `:model` - required. A model spec, as `"anthropic:claude-haiku-4-5"`.
+    * `:instructions` - the system prompt. Sent with every model call, never kept in the history.
+    * `:capabilities` - modules that give the agent its tools. See `WardrikCore.Capability`.
+    * `:middleware` - wraps every step. See `WardrikCore.Middleware`.
+    * `:principal` - who the agent acts as. See `WardrikCore.Principal`.
+    * `:credentials` - where tools find a person's credentials. See `WardrikCore.Credentials`.
+    * `:keys` - where code finds API keys. See `WardrikCore.Keys`.
+    * `:events` - where events go. See `WardrikCore.Events`.
+    * `:metadata` - anything of yours, passed to middleware. `%{}` unless set.
+    * `:timeout` - how long a turn may take, in milliseconds. `:infinity` unless set.
+    * `:max_rounds` - model calls a turn may make. `25` unless set.
+    * `:retries` - how failed calls are retried. See `WardrikCore.Retry`.
+    * `:prices` - model prices in US dollars per million tokens, by spec. Takes precedence over
+      the model catalog. `%{}` unless set.
+
+          prices: %{"zai_coding_plan:glm-5.1" => [input: 1.54, output: 4.84]}
+  """
   @spec start_agent(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_agent(instance \\ __MODULE__, opts) do
     opts =
@@ -103,7 +148,11 @@ defmodule WardrikCore do
     end
   end
 
-  @doc "Changes an agent's model or settings. The change applies from its next turn."
+  @doc """
+  Changes an agent's model or settings, from its next turn.
+
+  Takes `:model` and the options of `start_agent/2`, except `:agent_id`.
+  """
   @spec configure(GenServer.server(), keyword()) :: :ok
   def configure(agent, opts) do
     opts =
@@ -115,7 +164,7 @@ defmodule WardrikCore do
     GenServer.call(agent, {:configure, opts})
   end
 
-  @doc "Lists the id of every saved agent."
+  @doc "Returns the id of every saved agent."
   @spec list(atom()) :: [String.t()]
   def list(instance \\ __MODULE__) do
     instance
@@ -124,7 +173,7 @@ defmodule WardrikCore do
     |> Enum.map(fn info -> info.key end)
   end
 
-  @doc "Finds the running agent for `agent_id`, or returns `nil`."
+  @doc "Returns the running agent for `agent_id`, or `nil`."
   @spec whereis(atom(), String.t()) :: pid() | nil
   def whereis(instance \\ __MODULE__, agent_id) do
     case DurableServer.Supervisor.lookup(agents(instance), agent_id) do
@@ -134,29 +183,42 @@ defmodule WardrikCore do
   end
 
   @doc """
-  Queues a message and returns once it's stored. A running turn stops at its next step so the next
-  turn can answer it.
+  Queues a message. Returns once it's stored.
 
-  Put the `WardrikCore.Principal` who asked in `metadata` as `:principal`, and the turn that answers
-  acts on their behalf. A turn answers the messages in a row from one principal, never two.
+  A running turn ends at its next step, and the next turn answers the message.
 
-  Each message gets an `:id` in its metadata, unless you gave one.
+      :ok = WardrikCore.ask(agent, "Open an issue for the login bug.", %{principal: maria})
+
+  ## Metadata
+
+    * `:principal` - the `WardrikCore.Principal` who asked. The turn that answers acts for them.
+      A turn only answers consecutive messages from one principal.
+    * `:id` - the message's id. Generated unless set.
   """
   @spec ask(GenServer.server(), String.t(), map()) :: :ok
   def ask(agent, text, metadata \\ %{}) when is_binary(text) and is_map(metadata),
     do: GenServer.call(agent, {:ask, text, metadata})
 
+  @doc "Returns the agent's conversation."
   @spec history(GenServer.server()) :: [ReqLLM.Message.t()]
   def history(agent), do: GenServer.call(agent, :history)
 
+  @doc """
+  Returns what the agent is doing.
+
+    * `:idle` - nothing to do.
+    * `:running` - taking a turn.
+    * `:waiting` - parked, waiting on `resume/3`.
+    * `:due` - a turn is ready to run, such as one lost in a restart.
+  """
   @spec status(GenServer.server()) :: :idle | :running | :waiting | :due
   def status(agent), do: GenServer.call(agent, :status)
 
-  @doc "Stops the agent until it is started again."
+  @doc "Stops the agent. It stays saved, and runs again when started."
   @spec stop(GenServer.server()) :: :ok
   def stop(agent), do: GenServer.call(agent, :stop)
 
-  @doc "Returns the nodes of the cluster agents run on, by name."
+  @doc "Returns the names of the cluster nodes agents run on, sorted."
   @spec nodes(atom()) :: [String.t()]
   def nodes(instance \\ __MODULE__) do
     instance
@@ -166,7 +228,7 @@ defmodule WardrikCore do
     |> Enum.sort()
   end
 
-  @doc "Returns every saved agent's id, with the node it runs on, or `nil` while it isn't running."
+  @doc "Returns each saved agent's id mapped to the node running it, or `nil` if it isn't running."
   @spec placements(atom()) :: %{String.t() => String.t() | nil}
   def placements(instance \\ __MODULE__) do
     instance
@@ -176,8 +238,10 @@ defmodule WardrikCore do
   end
 
   @doc """
-  Starts the agent again on the node `node`, as it was. A turn it's taking ends, and what it waits
-  on is abandoned.
+  Restarts the agent on `node`, with its saved state.
+
+  Ends the turn it's taking, and abandons anything it's waiting on. Returns
+  `{:error, :no_such_node}` or `{:error, :not_found}` if the node or the agent doesn't exist.
   """
   @spec move(atom(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   def move(instance \\ __MODULE__, agent_id, node) do
@@ -192,7 +256,7 @@ defmodule WardrikCore do
     end
   end
 
-  @doc "Stops the agent and deletes everything saved of it. Deleting an agent there isn't is `:ok`."
+  @doc "Stops the agent and deletes its saved state. Returns `:ok` if there's no such agent."
   @spec delete(atom(), String.t()) :: :ok | {:error, term()}
   def delete(instance \\ __MODULE__, agent_id) do
     case DurableServer.Supervisor.terminate_and_delete_child(agents(instance), agent_id) do
@@ -203,40 +267,51 @@ defmodule WardrikCore do
   end
 
   @doc """
-  Stops the tool call `call_id` the agent is running. The model is answered with an error for it,
-  and the turn goes on.
+  Stops the running tool call `call_id`.
+
+  The model gets an error as the call's answer, and the turn goes on.
   """
   @spec kill(GenServer.server(), String.t()) :: :ok | {:error, :not_running}
   def kill(agent, call_id) when is_binary(call_id), do: GenServer.call(agent, {:kill, call_id})
 
-  @doc "Stops the turn that's running or parked."
+  @doc "Stops the running or parked turn. Returns `{:error, :idle}` if there's none."
   @spec interrupt(GenServer.server()) :: :ok | {:error, :idle}
   def interrupt(agent), do: GenServer.call(agent, :interrupt)
 
-  @doc "Says why the agent is parked, or returns `nil` if it isn't."
+  @doc """
+  Returns why the agent is parked, or `nil` if it isn't.
+
+  Parked tool calls return `{:tool_calls, [{call, outcome}]}`.
+  """
   @spec parked(GenServer.server()) :: term() | nil
   def parked(agent), do: GenServer.call(agent, :parked)
 
   @doc """
-  Carries on a parked turn, handing `input` to whatever parked it.
+  Resumes a parked turn, passing `input` to whatever parked it.
 
-  `metadata` is yours, like who answered. It's reported on the resumed turn's start event.
+      WardrikCore.resume(agent, %{"call_1" => :approve}, %{by: maria})
+
+  `metadata` is yours, such as who answered. It's reported on the resumed turn's
+  `[:wardrik_core, :turn, :start]` event. Returns `{:error, :not_parked}` if the agent isn't
+  parked.
   """
   @spec resume(GenServer.server(), term(), map()) :: :ok | {:error, :not_parked}
   def resume(agent, input, metadata \\ %{}) when is_map(metadata),
     do: GenServer.call(agent, {:resume, input, metadata})
 
   @doc """
-  Asks an evaluation model named `questions` about `state`, from inside a turn.
+  Asks an evaluation model `questions` about `state`, from inside a turn.
 
-  Returns each question's answer under its name, as the model gives it, and the call's
-  measurements, to pass to `WardrikCore.Context.measure/3`.
+  Use it when middleware needs a model's judgement on a call.
 
       questions = %{"urgent" => %{type: :boolean, instructions: "Is this urgent?"}}
       {:ok, %{"urgent" => %{"probability" => p}}, measurements} =
         WardrikCore.evaluate(context, "typesafe:jev-latest", "The site is down.", questions)
 
-  Reach for this when middleware needs a model's judgement on a call.
+      context = WardrikCore.Context.measure(context, measurements)
+
+  Returns each answer under its question's name, and the call's measurements. Pass them to
+  `WardrikCore.Context.measure/2`.
   """
   @spec evaluate(Context.t(), String.t(), String.t() | map(), map()) ::
           {:ok, map(), %{atom() => number()}} | {:error, term()}
@@ -253,44 +328,62 @@ defmodule WardrikCore do
   end
 
   @doc """
-  Calls the context's model once on its instructions and messages, offering its tools, from inside
-  a turn. It runs as a `:generate` step through the middleware, so policy and budgets see it as any
-  other model call, and streams nothing.
+  Calls the context's model once, from inside a turn.
 
-  Returns the context with the `response`, its message added to `messages`, and what the call used
-  measured.
+  Sends the context's instructions, messages and tools. Runs as a `:generate` step through the
+  middleware, so policy and budgets see it like any other model call. Streams nothing.
+
+  Use it when middleware needs the agent's own model, such as to summarise a long history.
 
       summarizing = %{context | instructions: "Summarise this conversation.", tools: []}
       {:ok, summarized} = WardrikCore.generate(summarizing)
       ReqLLM.Response.text(summarized.response)
       #=> "The user asked about..."
 
-  Reach for this when middleware needs the agent's own model, like summarising a long history.
+  Returns the context with `response` set, the reply added to `messages`, and the call's
+  measurements added.
   """
   @spec generate(Context.t()) :: WardrikCore.Middleware.result()
   def generate(%Context{} = context), do: Turn.call_model(context)
 
   @doc """
-  Runs `prompt` as one turn of a subagent, from inside a tool or middleware: the caller's model,
-  middleware and tools, with a conversation of `prompt` alone. It can't wait on a person, so a call
-  that would ends it with an error.
+  Runs `prompt` as one turn of a subagent, from inside a tool or middleware.
+
+  The subagent uses the caller's model, middleware and tools, with `prompt` as its only message.
 
       {:ok, %{text: text, labels: labels}, measurements} =
         WardrikCore.subagent(context, "Find this week's releases.", name: "researcher")
 
-  Takes `:name`, `:instructions` and `:capabilities` in place of the caller's, `:except_tools`, the
-  names of tools to leave out, `:max_rounds`, and `:timeout`, how long it may run, after which it
-  fails with `:timeout`, in milliseconds or `:infinity`, as unless set. A subagent that crashes
-  fails with `{:exit, reason}`. Returns its answer's `text` and the `labels` of
-  what it read, or why it failed, with what it measured either way, to pass to
-  `WardrikCore.Context.measure/2`. While it runs, its context's `subagent` is its name, so
-  middleware that counts what the caller's calls measure can leave its calls to the caller's.
+  Returns its answer's `text` and the `labels` of what it read. Returns `{:error, reason,
+  measurements}` if it fails. Either way, pass the measurements to
+  `WardrikCore.Context.measure/2`.
 
-  It emits `[:wardrik_core, :subagent, :started]` with its `prompt`, `:progress` as it begins each
-  tool call, with how many it has, then `:completed` with its `message`, or `:failed` with its
-  `error`, each with how many tool calls it made and what it measured, and each with its `agent`
-  `name` and `span`. Its own steps emit nothing to the caller's events, so these are the whole of
-  what a log sees of it.
+  It can't wait on a person. A call that would park ends it with an error. A subagent that crashes
+  fails with `{:exit, reason}`.
+
+  ## Options
+
+    * `:name` - its name. `"subagent"` unless set.
+    * `:instructions` - replaces the caller's.
+    * `:capabilities` - replaces the caller's.
+    * `:except_tools` - names of tools to leave out. `[]` unless set.
+    * `:max_rounds` - replaces the caller's.
+    * `:timeout` - milliseconds it may run before failing with `:timeout`. `:infinity` unless set.
+
+  ## Events
+
+  Its own steps emit nothing to the caller's events. Instead it emits:
+
+    * `[:wardrik_core, :subagent, :started]` - with its `prompt`.
+    * `[:wardrik_core, :subagent, :progress]` - as it begins each tool call.
+    * `[:wardrik_core, :subagent, :completed]` - with its `message`.
+    * `[:wardrik_core, :subagent, :failed]` - with its `error`.
+
+  See `WardrikCore.Telemetry` for their metadata.
+
+  While it runs, its context's `subagent` field holds its name. Middleware that counts what each
+  call measures can use it to skip the subagent's calls, and count the totals the caller adds
+  instead.
   """
   @spec subagent(Context.t(), String.t(), keyword()) ::
           {:ok, %{text: String.t(), labels: [String.t()]}, map()} | {:error, term(), map()}
@@ -298,8 +391,10 @@ defmodule WardrikCore do
     do: WardrikCore.Subagent.run(context, prompt, opts)
 
   @doc """
-  Returns what `model` costs in the model catalog, in US dollars per million tokens, or `nil` where
-  it has no price in dollars. Give it, or one built from it, as an agent's `:prices`.
+  Returns `model`'s price from the model catalog, in US dollars per million tokens.
+
+  Returns `nil` if the catalog has no price in dollars. Use the result, or one built from it, in
+  an agent's `:prices`.
 
       WardrikCore.price("anthropic:claude-haiku-4-5")
       #=> [input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25]
@@ -307,7 +402,7 @@ defmodule WardrikCore do
   @spec price(LLMDB.Model.t() | String.t()) :: WardrikCore.Usage.price() | nil
   def price(model), do: WardrikCore.Usage.price(model)
 
-  @doc "Returns how many tokens `model` reads at once, as the model catalog gives it, or `nil`."
+  @doc "Returns `model`'s context window in tokens, from the model catalog, or `nil`."
   @spec context_window(LLMDB.Model.t() | String.t()) :: pos_integer() | nil
   def context_window(model) do
     case ReqLLM.model(model) do

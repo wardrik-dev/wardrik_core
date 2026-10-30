@@ -1,7 +1,7 @@
 # Principals
 
-A principal is someone or something that can act, as in IAM. An agent has one of its own, like a
-service account. A message can come from another, and the turn that answers acts on their behalf:
+A principal is someone or something that can act, as in IAM. An agent has its own, like a service
+account. A message can come from another, and the turn that answers acts for them:
 
 ```elixir
 alias WardrikCore.Principal
@@ -17,10 +17,11 @@ maria = %Principal{id: "user:maria", attributes: %{org: "acme"}}
 :ok = WardrikCore.ask(agent, "Open an issue for the login bug.", %{principal: maria})
 ```
 
-Middleware and tools find who the turn acts for with `Context.acting_for/1`: whoever asked, else
-the agent itself. A turn answers the messages in a row from one principal, never two, so one shared
-agent never mixes two people's authority. Every step's span says who it was for, as
-`"enduser.id"`.
+Middleware and tools find who the turn acts for with `WardrikCore.Context.acting_for/1`: whoever
+asked, or else the agent itself.
 
-Core keeps principals and passes them on, but never reads their `attributes`. They're for the
-packages that decide by them, like a vault that keys secrets by `id`.
+A turn only answers consecutive messages from one principal. So a shared agent never mixes two
+people's authority in one turn. Every step's span records who it was for, as `"enduser.id"`.
+
+Core passes principals on but never reads their `attributes`. Those are for packages that decide by
+them, such as a vault that keys secrets by `id`.
