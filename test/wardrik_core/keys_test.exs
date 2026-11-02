@@ -12,7 +12,8 @@ defmodule WardrikCore.KeysTest do
     @behaviour WardrikCore.Keys
 
     @impl true
-    def fetch(name, %Principal{id: owner}, held), do: Map.fetch(held, {owner, name})
+    def fetch(%{name: name, principal: %Principal{id: owner}}, held),
+      do: Map.fetch(held, {owner, name})
   end
 
   defp context(held),

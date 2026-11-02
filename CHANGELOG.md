@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-rc.2
+
+### Breaking
+
+- `WardrikCore.Credentials` and `WardrikCore.Keys` callbacks take one request struct, then their
+  options: `resolve/2` and `refused/2` a `WardrikCore.Credentials.Request`, and `fetch/2` a
+  `WardrikCore.Keys.Request`.
+
 ## 0.1.0-rc.1 (2026-10-30)
 
 - Durable agents that run a model and its tools in a loop, kept in any `DurableServer` backend.
