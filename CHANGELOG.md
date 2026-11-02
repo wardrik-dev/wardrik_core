@@ -7,6 +7,9 @@
 - `WardrikCore.Credentials` and `WardrikCore.Keys` callbacks take one request struct, then their
   options: `resolve/2` and `refused/2` a `WardrikCore.Credentials.Request`, and `fetch/2` a
   `WardrikCore.Keys.Request`.
+- `WardrikCore.evaluate/2` takes the context, then named `:model`, `:state` and `:questions`.
+- `WardrikCore.move/3` takes the node as `to:`, so it can't swap with the agent's id.
+- `WardrikCore.Retry.run/3` takes `:transient` and `:announce` by name.
 
 ## 0.1.0-rc.1 (2026-10-30)
 

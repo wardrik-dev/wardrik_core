@@ -68,6 +68,10 @@ defmodule WardrikCore.KeysTest do
     context = context(%{{"acme", "ANTHROPIC_API_KEY"} => "sk-acme"})
 
     assert {:ok, %{}, _measured} =
-             WardrikCore.evaluate(context, "anthropic:claude-haiku-4-5", "state", %{})
+             WardrikCore.evaluate(context,
+               model: "anthropic:claude-haiku-4-5",
+               state: "state",
+               questions: %{}
+             )
   end
 end
